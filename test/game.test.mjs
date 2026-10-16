@@ -16,12 +16,12 @@ async function fixture(t,fetchAI){
  const url=`http://127.0.0.1:${server.address().port}`,sessions=new Map();
  async function req(route,body,cookie,headers={}){const res=await fetch(url+'/api'+route,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json','Origin':url}:{}),...(cookie?{Cookie:cookie,'X-CSRF-Token':sessions.get(cookie)||''}:{}),...headers},...(body?{body:JSON.stringify(body)}:{})});const data=await res.json();if(res.status===202&&data.job){let job=data.job;for(let i=0;job.state==='pending'&&i<300;i++){await new Promise(r=>setTimeout(r,10));const poll=await fetch(url+'/api/jobs/'+job.id,{headers:{Cookie:cookie}});const state=await poll.json();if(!poll.ok)return{status:poll.status,body:state};job=state.job;}assert.notEqual(job.state,'pending');return job.state==='failed'?{status:job.error.status,body:{error:job.error.message}}:{status:200,body:job.result};}const setCookie=res.headers.get('set-cookie')?.split(';')[0];if(setCookie&&data.csrf)sessions.set(setCookie,data.csrf);return {status:res.status,body:data,cookie:setCookie};}
  const password='A long unique passphrase 938!';
- const admin=await server.identity.createAdmin('alice','Alice',password,{mfa:false});
+ const admin=await server.identity.createAdmin('alice','Alice',password);
  const login=await req('/auth/login',{username:'alice',password});assert.equal(login.status,200);
  const host=(await req('/rooms',{name:'Test campaign',country:'FR',mapMode:'strategy'},login.cookie)).body;host.token=login.cookie;
  const id=host.room.id;
  const joinInvite=(await req(`/rooms/${id}/invite`,{},host.token)).body.invite;
- async function member(name,country){const i=server.identity.newInvite(admin.user.id);const reg=await req('/auth/register',{username:name.toLowerCase(),name,password,invite:i.invite});assert.equal(reg.status,200);const joined=await req(`/rooms/${id}/join`,{country,invite:joinInvite},reg.cookie);assert.equal(joined.status,201);return {...joined.body,token:reg.cookie,user:reg.body.user};}
+ async function member(name,country){const reg=await req('/auth/register',{username:name.toLowerCase(),name,password});assert.equal(reg.status,200);const joined=await req(`/rooms/${id}/join`,{country,invite:joinInvite},reg.cookie);assert.equal(joined.status,201);return {...joined.body,token:reg.cookie,user:reg.body.user};}
  const guest=await member('Bob','DE');
  return {req,host,guest,id,dataDir,server,url,config,member,joinInvite,sessions,password,route:action=>`/rooms/${id}${action?'/'+action:''}`};
 }
@@ -177,8 +177,8 @@ test('editable prompts are host-only, atomic, persisted and supplied to private 
 test('nearby nations follow current territory ownership and invited lobbies expose only seat choices',async t=>{
  const {nearbyCountries}=await import('../diplomacy.mjs');const world={regions:[{id:'a',owner:'A',neighbors:['b','c','d']},{id:'b',owner:'B',neighbors:['a']},{id:'c',owner:'B',neighbors:['a']},{id:'d',owner:'A',neighbors:['a']}]};
  assert.deepEqual(nearbyCountries(world,'A'),['B']);world.regions[1].owner='C';assert.deepEqual(nearbyCountries(world,'A'),['B','C']);assert.deepEqual(nearbyCountries(world,'Z'),[]);
- const f=await fixture(t),i=f.server.identity.newInvite(f.server.identity.db.prepare('SELECT id FROM users WHERE username=?').get('alice').id);
- const signup=await f.req('/auth/register',{username:'newcomer',name:'Newcomer',password:f.password,invite:i.invite});assert.equal(signup.status,200);
+ const f=await fixture(t);
+ const signup=await f.req('/auth/register',{username:'newcomer',name:'Newcomer',password:f.password});assert.equal(signup.status,200);
  assert.equal((await f.req(f.route('lobby'),{invite:'bad'},signup.cookie)).status,403);
  const lobby=await f.req(f.route('lobby'),{invite:f.joinInvite},signup.cookie);assert.equal(lobby.status,200);assert.equal(lobby.body.countries.length,28);
  assert.equal(lobby.body.countries.find(c=>c.id==='FR').available,false);assert.equal(lobby.body.countries.find(c=>c.id==='DE').available,false);assert.equal(lobby.body.countries.find(c=>c.id==='IT').available,true);

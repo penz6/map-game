@@ -43,3 +43,8 @@ Version 3.5 adds the strict 20K ceiling, scoped policy snapshots and bounded sta
 ## Version 3.6 update
 
 The earlier 3.5 measurements describe the prior 20K release. Current default and maximum total context are 32,768, with output/schema/framing reserves and compaction retained. Wild Map supports eight sequential operations and transaction-local new-state refs; invalid refs, ownership, human protections and final capacity reject the entire proposal. Exact adjacency is supplied as reference data. No new tool/network/account authority is granted. See AI.md for current measurements and memory limitations.
+
+
+## Version 3.7 access and victory changes
+
+Open registration replaces the earlier invitation-only account model. MFA and its key provisioning are removed at user request. Persistent username/global registration budgets constrain password hashing without trusting proxy IPs. Campaign invitations are reusable seven-day links and remain gated by account login. Admin-only seat assignment supports late entry and swaps with private-state clearing and stale-job rejection. Private victory prompts use bounded queued AI recommendations followed by reviewed public declaration; stale and no-winner proposals cannot finish play. Existing defeat protections are unchanged. See SECURITY.md for current boundaries; older audit entries describe earlier releases.

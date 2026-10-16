@@ -1,4 +1,6 @@
 import http from 'node:http';
+import {assignCampaignSeat} from './campaign-admin.mjs';
+import {assessVictory} from './victory.mjs';
 import { createAIQueue } from './ai-queue.mjs';
 import { createAIJobs } from './ai-jobs.mjs';
 import { adjudicateBoundedTurn,assertWorldFits } from './turn-planner.mjs';
@@ -20,7 +22,7 @@ const token=()=>randomBytes(24).toString('hex');
 const text=(x,max,label='Text')=>{check(typeof x==='string'&&x.trim().length>0&&x.length<=max,`${label} must contain 1–${max} characters.`);return x.trim();};
 export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'data'),fetchAI=fetch,config=securityConfig(),clock=Date.now}={}){
  fs.mkdirSync(dataDir,{recursive:true,mode:0o700});
- const identity=createIdentityStore(dataDir,{production:config.production,keyHex:config.mfaKey,now:clock});
+ const identity=createIdentityStore(dataDir,{now:clock});
  const lockFile=path.join(dataDir,'server.lock');
  if(fs.existsSync(lockFile)){const pid=Number(fs.readFileSync(lockFile,'utf8'));let alive=false;try{process.kill(pid,0);alive=true;}catch(e){check(e.code==='ESRCH','Cannot verify data directory lock.');}check(!alive,'Another server already owns this data directory.');fs.unlinkSync(lockFile);}
  fs.writeFileSync(lockFile,String(process.pid),{flag:'wx',mode:0o600});
@@ -34,8 +36,8 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const save=(r,previous=r)=>{check(!rooms.has(r.id)||rooms.get(r.id)===previous,'Campaign state changed. Retry using the current world.',409);const file=path.join(dataDir,r.id+'.json');const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(r),{mode:0o600});fs.renameSync(tmp,file);rooms.set(r.id,r);};
  const auth=(r,account)=>{check(!r.closed,'This campaign has been closed.',403);const p=r.players.find(p=>p.accountId===account.user.id);check(p,'You are not a member of this campaign.',403);return p;};
  const host=(r,p)=>check(r.hostId===p.id,'Only the host can do that.',403);
- const planning=r=>check(r.phase==='planning','Wait for the current world simulation to finish.',409);
- const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,contextCeiling:32768,stagedTurns:true,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
+ const planning=r=>check(r.phase==='planning',r.phase==='finished'?'This campaign has finished. Ask an administrator to reopen it.':'Wait for the current world simulation to finish.',409);
+ const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,victory:r.victory?.declaration||null,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,contextCeiling:32768,stagedTurns:true,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
  const checkWorldCapacity=r=>{if(r.mode==='ollama')assertWorldFits(r,{contextLength:config.aiContext,outputTokens:config.aiTurnOutput});};
  const aiQueue=createAIQueue({concurrency:config.aiConcurrency}),jobs=createAIJobs({clock,maxActive:config.aiConcurrency+32});
  async function readAIJSON(response){const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;check(size<=1024*1024,'AI response exceeded the allowed size.',502);chunks.push(Buffer.from(chunk));}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new GameError('AI returned an invalid response.',502);}}
@@ -65,14 +67,14 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const getCookie=req=>{const pairs=(req.headers.cookie||'').split(';').map(x=>x.trim());return pairs.find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1)||'';};
  const setCookie=(res,value,age=8*3600)=>res.setHeader('Set-Cookie',`${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${config.production?'; Secure':''}`);
  const requireAccount=req=>{const a=identity.session(getCookie(req));check(a,'Sign in to continue.',401);return a;};
- const requireAdmin=a=>{check(a.user.role==='admin','Administrator permission is required.',403);check(clock()-a.session.auth_at<=10*60000,'Confirm your password and authenticator code in Account settings before this administrator action.',428);};
+ const requireAdmin=a=>{check(a.user.role==='admin','Administrator permission is required.',403);check(clock()-a.session.auth_at<=10*60000,'Confirm your password in Account settings before this administrator action.',428);};
  const launch=(res,account,r,p,req,b,work)=>{
   const key=req.headers['idempotency-key']||token();
   check(typeof key==='string'&&/^[A-Za-z0-9_-]{8,80}$/.test(key),'Use an 8–80 character idempotency key.');
   const revision=r.revision||0,round=r.round,phase=r.phase;
   const job=jobs.start({owner:account.user.id,key,route:req.url,body:b,roomId:r.id,seat:p.id,work:async()=>{
    let release;
-   try{release=await aiQueue.acquire(account.user.id);const current=rooms.get(r.id);const fresh=requireAccount(req);check(current&&auth(current,fresh).id===p.id,'Your government seat changed. Retry.',409);check((current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Retry.',409);
+   try{release=await aiQueue.acquire(account.user.id);const current=rooms.get(r.id);const fresh=requireAccount(req);check(current,'Campaign unavailable.',410);if(p.id==='@admin')requireAdmin(fresh);else check(auth(current,fresh).id===p.id,'Your government seat changed. Retry.',409);check((current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Retry.',409);
     return await work();
    }catch(e){if(req.url.endsWith('/advance')&&rooms.get(r.id)===r&&r.phase==='resolving'&&r.round===round&&(r.revision||0)===revision){r.phase='planning';r.error=e.message;save(r);}throw e;}
    finally{release?.();}
@@ -114,12 +116,12 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    identity.throttle((req.method==='POST'?'write:':'read:')+account.user.id,req.method==='POST'?120:300,60000);
    if(req.method==='POST')check(constantEqual(req.headers['x-csrf-token'],account.session.csrf),'Invalid request verification token. Reload the page.',403);
    if(req.method==='GET'&&parts[1]==='jobs'&&parts.length===3){
-    const job=jobs.get(account.user.id,parts[2]),current=rooms.get(job.roomId);check(current,'Campaign unavailable.',410);const seat=auth(current,account);check(seat.id===job.seat,'Your government seat changed.',409);
+    const job=jobs.get(account.user.id,parts[2]),current=rooms.get(job.roomId);check(current,'Campaign unavailable.',410);const seat=job.seat==='@admin'?(requireAdmin(account),null):auth(current,account);check(job.seat==='@admin'||seat.id===job.seat,'Your government seat changed.',409);
     reply(res,200,{job:{...jobs.view(job),...(job.state==='done'?{result:job.result?.roomId?view(current,seat):job.result}:{})}});return;
    }
    if(req.method==='POST'&&req.headers['idempotency-key']){
     const previous=jobs.lookup(account.user.id,req.headers['idempotency-key'],req.url,requestBody);
-    if(previous){const current=rooms.get(previous.roomId);check(current&&auth(current,account).id===previous.seat,'Your government seat changed.',409);reply(res,202,{job:jobs.view(previous)});return;}
+    if(previous){const current=rooms.get(previous.roomId);check(current,'Campaign unavailable.',410);if(previous.seat==='@admin')requireAdmin(account);else check(auth(current,account).id===previous.seat,'Your government seat changed.',409);reply(res,202,{job:jobs.view(previous)});return;}
    }
    if(req.method==='GET'&&url.pathname==='/api/account/rooms'){reply(res,200,{rooms:[...rooms.values()].filter(r=>!r.closed&&r.players.some(p=>p.accountId===account.user.id)).map(r=>({id:r.id,name:r.name,round:r.round,country:r.players.find(p=>p.accountId===account.user.id).country}))});return;}
    if(req.method==='POST'&&parts[1]==='auth'){
@@ -131,14 +133,41 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }
    if(parts[1]==='admin'){
     check(account.user.role==='admin','Administrator permission is required.',403);
+    if(req.method==='GET'&&parts[2]==='campaign'&&parts.length===4){const r=rooms.get(parts[3]);check(r,'Campaign not found.',404);reply(res,200,{id:r.id,name:r.name,round:r.round,phase:r.phase,closed:!!r.closed,revision:r.revision||0,players:r.players.map(p=>({name:p.name,country:p.country,username:identity.findUser(p.accountId)?.username})),countries:r.world.countries.filter(c=>r.world.regions.some(p=>p.owner===c.id)).map(c=>({id:c.id,name:c.name})),victory:r.victory||{criteria:'',assessment:null,declaration:null}});return;}
     if(req.method==='GET'&&parts.length===2){reply(res,200,{...identity.summary(),rooms:[...rooms.values()].map(r=>({id:r.id,name:r.name,players:r.players.length,phase:r.phase,closed:!!r.closed}))});return;}
     check(req.method==='POST'&&parts.length===3,'Not found.',404);requireAdmin(account);const b=requestBody;
-    if(parts[2]!=='invite')check(typeof b.id==='string'&&/^[a-zA-Z0-9]{6,24}$/.test(b.id),'Invalid target identifier.');
-    if(parts[2]==='invite'){reply(res,201,identity.newInvite(account.user.id));return;}
-    if(parts[2]==='revoke-invite')identity.revokeInvite(account.user.id,b.id);
-    else if(parts[2]==='user-status'){check(typeof b.disabled==='boolean','Invalid account status.');identity.setDisabled(account.user.id,b.id,b.disabled);}
+    check(typeof b.id==='string'&&/^[a-zA-Z0-9]{6,24}$/.test(b.id),'Invalid target identifier.');
+    if(['assign-seat','campaign-invite','victory-config','victory-assess','victory-declare','victory-reopen'].includes(parts[2])){
+     let target=rooms.get(b.id);check(target&&!target.closed,'Campaign not found.',404);
+     if(parts[2]==='victory-reopen'){check(target.phase==='finished','Campaign has not finished.',409);target.phase='planning';target.victory.declaration=null;target.victory.assessment=null;target.revision=(target.revision||0)+1;for(const p of target.players){p.ready=false;p.orders=[];}restartTimer(target,clock());save(target);}
+     else{
+      planning(target);
+      if(parts[2]==='campaign-invite'){const value=randomToken();target.inviteHash=digest(value);target.inviteExpires=clock()+7*86400000;save(target);identity.audit(account.user.id,'campaign_invite_rotated',target.id);reply(res,200,{invite:value,expires:target.inviteExpires});return;}
+      if(parts[2]==='assign-seat'){
+       check(typeof b.swap==='boolean'||b.swap===undefined,'Invalid swap option.');
+       const user=identity.db.prepare('SELECT * FROM users WHERE username=?').get(typeof b.username==='string'?b.username.toLowerCase():'');
+       const next=assignCampaignSeat(target,user,b.country,{swap:b.swap===true});checkWorldCapacity(next);save(next,target);target=next;
+      }else if(parts[2]==='victory-config'){
+       const criteria=text(b.criteria,6000,'Victory criteria');target.victory={criteria,assessment:null,declaration:null};target.revision=(target.revision||0)+1;save(target);
+      }else if(parts[2]==='victory-assess'){
+       check(target.mode==='ollama','Configure Ollama for this campaign first.');const snapshot=structuredClone(target),revision=target.revision||0;
+       return launch(res,account,target,{id:'@admin'},req,b,async()=>{
+        const assessment=await assessVictory(snapshot,(messages,format)=>call(snapshot,messages,format,account.user.id,()=>requireAdmin(requireAccount(req))));
+        requireAdmin(requireAccount(req));const current=rooms.get(target.id);planning(current);check((current.revision||0)===revision&&current.round===snapshot.round&&JSON.stringify(current.players.map(p=>[p.id,p.country]))===JSON.stringify(snapshot.players.map(p=>[p.id,p.country])),'Campaign changed during evaluation. Evaluate again.',409);
+        current.victory.assessment={...assessment,id:token(),round:current.round,revision,at:clock()};save(current);identity.audit(account.user.id,'victory_assessed',current.id);return {assessment:current.victory.assessment};
+       });
+      }else if(parts[2]==='victory-declare'){
+       const a=target.victory?.assessment;check(a&&a.id===b.assessmentId&&a.revision===(target.revision||0)&&a.round===target.round&&a.met,'Evaluate the current campaign and obtain a winning recommendation first.',409);
+       const message=text(b.message,2000,'Public winner announcement');
+       target.victory.declaration={winners:a.winners.map(id=>({country:id,nation:target.world.countries.find(c=>c.id===id).name,player:target.players.find(p=>p.country===id).name})),message,round:target.round,at:clock()};
+       target.phase='finished';target.revision=(target.revision||0)+1;save(target);
+      }
+     }
+     identity.audit(account.user.id,parts[2],target.id);reply(res,200,{ok:true});return;
+    }
+    if(parts[2]==='user-status'){check(typeof b.disabled==='boolean','Invalid account status.');identity.setDisabled(account.user.id,b.id,b.disabled);}
     else if(parts[2]==='revoke-sessions'){check(identity.findUser(b.id),'Account not found.');identity.revokeUser(b.id);identity.audit(account.user.id,'sessions_revoked',b.id);}
-    else if(parts[2]==='close-room'){const target=rooms.get(b.id);check(target,'Campaign not found.');planning(target);target.closed=true;save(target);identity.audit(account.user.id,'campaign_closed',b.id);}
+    else if(parts[2]==='close-room'){const target=rooms.get(b.id);check(target,'Campaign not found.');check(target.phase!=='resolving','Wait for resolution before closing.',409);target.closed=true;save(target);identity.audit(account.user.id,'campaign_closed',b.id);}
     else throw new GameError('Not found.',404);
     reply(res,200,{ok:true});return;
    }
@@ -164,7 +193,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
     if(action==='lobby'){reply(res,200,{map:r.world.name,date:r.world.date,countries:r.world.countries.map(c=>({id:c.id,name:c.name,available:!['merged','annexed'].includes(c.status)&&r.world.regions.some(x=>x.owner===c.id)&&!r.players.some(p=>p.country===c.id)}))});return;}
     check(r.world.countries.some(c=>c.id===b.country)&&r.world.regions.some(x=>x.owner===b.country),'Choose a country with territory.');
     check(!r.players.some(p=>p.country===b.country),'That country already has a player.',409);
-    const p={id:token().slice(0,12),accountId:account.user.id,name:account.user.display_name,country:b.country,orders:[],ready:false};r.players.push(p);save(r);identity.audit(account.user.id,'campaign_joined',r.id);reply(res,201,{room:view(r,p)});return;
+    const p={id:token().slice(0,12),accountId:account.user.id,name:account.user.display_name,country:b.country,orders:[],ready:false};r.players.push(p);if(r.victory)r.victory.assessment=null;save(r);identity.audit(account.user.id,'campaign_joined',r.id);reply(res,201,{room:view(r,p)});return;
    }
    const p=auth(r,account);
    if(req.method==='GET'){
@@ -172,7 +201,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
     if(action==='export'){host(r,p);reply(res,200,{format:'historia-local-public-v1',name:r.name,world:r.world,history:r.history,round:r.round});return;}
     throw new GameError('Not found.',404);
    }
-   check(req.method==='POST','Method not allowed.',405);const b=requestBody;
+   check(req.method==='POST','Method not allowed.',405);const b=requestBody;check(b._seat===undefined||b._seat===p.id,'Your nation assignment changed. Refresh before submitting.',409);
    if(action==='orders'){planning(r);check(!timerExpired(r,clock()),'The turn deadline has passed. Saved orders are locked.',409);check(!p.ready,'Unready before changing orders.',409);p.orders=validateOrders(r,p,b.orders);save(r);}
    else if(action==='ready'){planning(r);check(!timerExpired(r,clock()),'The turn deadline has passed. Saved orders are locked.',409);check(typeof b.ready==='boolean','Invalid readiness.');validateOrders(r,p,p.orders);p.ready=b.ready;save(r);}
    else if(action==='scenario'){
@@ -217,9 +246,9 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }
    else if(action==='remove'){
     host(r,p);planning(r);check(b.playerId!==p.id,'The host cannot remove themselves.');
-    check(r.players.some(x=>x.id===b.playerId),'Player not found.');r.players=r.players.filter(x=>x.id!==b.playerId);save(r);
+    check(r.players.some(x=>x.id===b.playerId),'Player not found.');r.players=r.players.filter(x=>x.id!==b.playerId);if(r.victory)r.victory.assessment=null;save(r);
    }
-   else if(action==='invite'){host(r,p);planning(r);const value=randomToken();r.inviteHash=digest(value);r.inviteExpires=clock()+86400000;save(r);identity.audit(account.user.id,'campaign_invite_rotated',r.id);reply(res,200,{invite:value,expires:r.inviteExpires});return;}
+   else if(action==='invite'){host(r,p);planning(r);const value=randomToken();r.inviteHash=digest(value);r.inviteExpires=clock()+7*86400000;save(r);identity.audit(account.user.id,'campaign_invite_rotated',r.id);reply(res,200,{invite:value,expires:r.inviteExpires});return;}
    else if(action==='chat'){
     planning(r);const message=text(b.text,2000,'Message');const to=b.to||'all';
     check(to==='all'||r.world.countries.some(c=>c.id===to),'Unknown recipient.');check(to!==p.country,'Choose another country.');check(to==='all'||!['annexed','merged'].includes(r.world.countries.find(c=>c.id===to).status),'That government no longer exists.');

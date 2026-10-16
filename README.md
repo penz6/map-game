@@ -1,4 +1,4 @@
-# Historia Local 3.5 — multiplayer AI map sandbox
+# Historia Local 3.7 — multiplayer AI map sandbox
 
 An original self-hosted alternate-history game using your Ollama endpoint. It is not built on another game's image or engine. Runtime dependencies are Node.js and its bundled SQLite; there is no npm installation/build step or CDN. The Docker image uses the official Node base behind your Pangolin/Traefik HTTPS route.
 
@@ -8,14 +8,14 @@ See [FEATURES.md](FEATURES.md) for the current feature matrix and gaps, [AUDIT.m
 
 ## Docker
 
-Follow [DOCKER.md](DOCKER.md): configure the domain, HTTPS origin, private MFA secret and Ollama endpoint, then:
+Follow [DOCKER.md](DOCKER.md): configure the domain, HTTPS origin and Ollama endpoint, then:
 
 ```sh
 docker compose up -d --build
 docker compose exec app node manage.mjs create-admin
 ```
 
-Create the administrator interactively, enroll its authenticator and sign in at your configured HTTPS URL. There are no default accounts/passwords. Use a fresh data directory/volume for this pre-deployment ruleset; obsolete prototype saves are not migrated.
+Create the administrator interactively and sign in with its username and password at your configured HTTPS URL. There are no default accounts/passwords. Use a fresh data directory/volume for this pre-deployment ruleset; obsolete prototype saves are not migrated.
 
 `.github/workflows/container.yml` tests and builds PRs, and publishes amd64/arm64 images to GHCR after default-branch pushes or version tags. Creating the file locally has not published a registry image. It uses GitHub's built-in token with package-write permission.
 
@@ -32,15 +32,15 @@ Open `http://localhost:3000` on that computer. Localhost is not a remotely hoste
 
 ## Accounts and campaigns
 
-The server administrator issues single-use seven-day account invitations, disables accounts, revokes sessions, closes campaigns and reviews security events. Administrator login uses password plus TOTP. Account recovery is console-only. Accounts use salted scrypt password hashes and server-side HttpOnly cookie sessions with CSRF/Origin checks.
+Registration is open to everyone; new users always receive the member role. The server administrator disables accounts, revokes sessions, manages campaign assignments, closes campaigns and reviews security events. All accounts use password-only login; MFA and its encryption-key setup have been removed. Account recovery is console-only. Accounts use salted scrypt password hashes and server-side HttpOnly cookie sessions with CSRF/Origin checks.
 
-Each account can hold one nation in a campaign. A campaign host generates a separate 24-hour campaign invitation; guests load available nations and choose an unclaimed country with land. Up to 12 human players share the same world; unclaimed nations remain map owners. In Wild Map, one world director changes the world without separate nation action plans. New independent nations become available seats too. New accounts are ordinary members; additional administrators require the console.
+Each account can hold one nation in a campaign. A campaign host or server administrator generates a reusable seven-day campaign invitation; guests without accounts are prompted to register with their invitation preserved, then load available nations and choose an unclaimed country with land. Up to 12 human players share the same world; unclaimed nations remain map owners. In Wild Map, one world director changes the world without separate nation action plans. New independent nations become available seats too. New accounts are ordinary members; additional administrators require the console.
 
 Host and administrator privileges are separate. Administrators have no automatic API access to another campaign's private chat. The machine operator can inspect save files, so this is not end-to-end encrypted hosting. See [SECURITY.md](SECURITY.md) for the full boundaries, session lifetimes, throttling and deployment requirements.
 
 ## Play
 
-Players save up to three orders and mark ready. The host advances once everyone is ready or the optional countdown expires. Orders remain private until resolution. In Wild Map, write a Policy describing what you want, or simply ready up and watch events unfold. The director proposes up to four validated map changes, with at least one real ownership change. It gets one correction attempt for invalid proposals; if that also fails, the world and saved orders stay intact. Demo mode makes no AI calls and does not generate director map changes. Strategy mode instead adds bounded policy effects and NPC orders.
+Players save up to three orders and mark ready. The host advances once everyone is ready or the optional countdown expires. Orders remain private until resolution. In Wild Map, write a Policy describing what you want, or simply ready up and watch events unfold. The director proposes up to eight validated map changes, with at least one real ownership change. It gets one correction attempt for invalid proposals; if that also fails, the world and saved orders stay intact. Demo mode makes no AI calls and does not generate director map changes. Strategy mode instead adds bounded policy effects and NPC orders.
 
 | Order | Treasury | Effect |
 | --- | ---: | --- |
@@ -64,7 +64,7 @@ Armies have persistent IDs, strength and province positions. One army can receiv
 
 Treaties last 12 further turns. Trade adds 3 income per active partner; nonaggression and alliances block attacks. Alliances add 3 defensive garrison strength per ally, capped at 9. Break a blocking treaty in an earlier turn before attacking. Hostile action ends other bilateral agreements. Unification does not silently execute from a chat promise. Political orders that become impossible during combat are not completed and refund their fixed cost.
 
-A nation with land earns rounded economy/5 treasury, minimum 2, each turn. Statistics are abstract and bounded. A landless human nation remains in exile rather than being silently reassigned. Calendar jumps are 1/3/6 months; costs and effects are per turn. There is no fixed victory condition, naval/air model, terrain/supply simulation or global economic market.
+A nation with land earns rounded economy/5 treasury, minimum 2, each turn. Statistics are abstract and bounded. A landless human nation remains in exile rather than being silently reassigned. Calendar jumps are 1/3/6 months; costs and effects are per turn. Victory criteria are editable by server administrators, as described below. There is no naval/air model, terrain/supply simulation or global economic market.
 
 ## Live turn timer
 
@@ -92,13 +92,20 @@ Hosts can edit turn/diplomacy/advisor prompts per campaign. The fixed applicatio
 
 ## Recovery and checks
 
-Stop the server before coherent backups of the whole data directory/volume, and preserve the separate MFA key securely. Public exports are not account backups. Console recovery:
+Stop the server before coherent backups of the whole data directory/volume. Public exports are not account backups. Console recovery:
 
 ```sh
 node manage.mjs reset-password USERNAME
-node manage.mjs reset-mfa USERNAME
 ```
 
-For Docker, prefix with `docker compose exec app`. Password resets revoke sessions; MFA reset re-enrolls the authenticator. Do not regenerate secrets on upgrade or use `docker compose down -v` to stop an installation you intend to keep.
+For Docker, prefix with `docker compose exec app`. Password resets revoke sessions. Do not use `docker compose down -v` to stop an installation you intend to keep.
 
 Run `npm test`. See [VALIDATION.md](VALIDATION.md) for actual checks and untested boundaries. Authentication and regression checks are not a security certification or a live-model benchmark.
+
+## Campaign administration and winning
+
+Open **Administration → Campaigns → Manage**. Administrators can add an existing active account to a nation midway through a campaign, reassign a player to an unclaimed nation, or swap two existing players. Changes are allowed between turns, including after a timer deadline (extend the timer to let new players submit). They clear affected players' saved orders/private conversations, invalidate old seat jobs, and reset everyone to unready. Host privileges follow the host's new seat. Territory stays with the nation. Duplicate seats and landless/retired nations are refused.
+
+The same screen contains **Private victory criteria**. Save a prompt such as “The first player to own six provinces and maintain stability above 70 wins.” Click **Evaluate current world with AI**. The model sees the current world and compacted public history, not private chat or current secret orders. It can recommend one winner, a tie, or no winner. All criteria/recommendations remain admin-only; evaluation is queued and stays within the same 32K budget.
+
+Review the result, enter a separate public announcement, and choose **Declare winner and finish campaign**. Only a current winning recommendation can be published. Players see the winning nation/player and announcement; turn mutations stop. Admins can reopen the campaign. Changed criteria/world/assignments invalidate recommendations. Criteria express subjective rules for AI review; admin confirmation decides the result. No new defeat/elimination mechanic was added; existing human nation protection remains enabled by default.

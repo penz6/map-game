@@ -4,9 +4,9 @@ Reviewed October 16, 2026. This is an original Ollama game inspired by AI grand 
 
 | Capability | Current implementation | Boundary / missing work |
 | --- | --- | --- |
-| Shared multiplayer | One to twelve human seats, invitation accounts, simultaneous private orders, host-controlled shared turns | Single server/process; no host transfer, spectators or seamless host departure |
+| Shared multiplayer | One to twelve human seats, open-registration accounts, simultaneous private orders, host-controlled shared turns | Single server/process; no host transfer, spectators or seamless host departure |
 | Live turn timer | 30 seconds–24 hours, pause/resume/extend/disable, server-enforced deadline and saved-order lock | Host still presses Advance; no automatic resolution on expiry |
-| AI changes the map | Wild Map requires a real province-ownership change each successful AI turn; up to four validated changes | No scripted fallback if both AI proposals fail |
+| AI changes the map | Wild Map requires a real province-ownership change each successful AI turn; up to eight validated changes | No scripted fallback if both AI proposals fail |
 | Nation creation and destruction | Secession, collapse into 2–4 successors, unions, transfers, restored identities, names/colors/governments/leaders | Up to 64 nation identities; human identities cannot be deleted; final human province protected by default |
 | Map | 28 starting nations and 84 original schematic European provinces | No accurate global geographic dataset; territory transfers change owners of existing polygons, not their shapes |
 | Human army commands | Recruit, move, attack, persistent unit IDs/strength, attrition and retreats in either mode | Land armies only; no fleets, aircraft, terrain, supply or detailed logistics |
@@ -22,7 +22,7 @@ Reviewed October 16, 2026. This is an original Ollama game inspired by AI grand 
 | Saves/history | Persisted world, public events, private dialogue, 20 whole-turn checkpoints | No per-event reveal/intervention, branching story scene engine or named branch manager |
 | Scenario editing | Validated starting-world JSON import/edit/export before turn 1 | No visual polygon editor or preset marketplace; up to 512 imported provinces can exceed the model budget |
 | Advisor | Optional private Q&A/suggestions | No streamed charts/reports/artifact workflow; not needed for normal turns |
-| Accounts/admin | Scrypt passwords, TOTP for administrators, invitations, server sessions, revocation, CSRF/Origin checks, application rate limits and audit | No public signups, email recovery, SSO or end-to-end encrypted chat |
+| Accounts/admin | Open signup, scrypt passwords, password-only admins, server sessions, revocation, CSRF/Origin checks, application rate limits and audit | No email recovery, SSO, MFA or end-to-end encrypted chat |
 | Deployment | Docker, non-root/read-only container, Pangolin/Traefik backend on 0.0.0.0:3000, no proxy-IP trust requirement | Pangolin/Traefik provides external TLS/routing; no live ingress or GPU benchmark performed |
 | Publishing | PR tests/image smoke, GHCR workflow for eligible default-branch/tag pushes, amd64/arm64 build targets | A workflow configuration is not a deployed game or proof of arm64 runtime validation |
 
@@ -31,3 +31,5 @@ The most relevant missing Pax-style features are accurate global maps, visual sc
 Recommended local model starting point remains qwen2.5:7b Q4, one generation and at most 32,768 total context. Large turns use bounded sequential passes, with lossy final intent summaries and atomic commit. Smaller-model reliability and RX 6750 XT runtime memory have not been measured. Use AI.md and scripts/context-report.mjs for workload-specific context sizing.
 
 Version 3.6 adds up to eight Wild Map operations per turn, temporary new-state references for cross-border federations and same-turn government changes, exact adjacency context, stronger continuity guidance, and longer staged policy intents at 32K. Province geometry remains fixed.
+
+Version 3.7 adds reusable seven-day signup-aware campaign invitations, administrator mid-game additions/reassignments/swaps, private per-campaign victory prompts, queued AI evaluation, reviewed winner/tie publication, finished campaigns and reopening. Victory uses world/public history; private chat and current secret orders are excluded. Criteria are subjective AI review instructions, not a deterministic scoring language. No new defeat system was added.

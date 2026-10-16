@@ -14,7 +14,7 @@ try{
  await docker('exec',name,'node','docker/healthcheck.mjs');
  await docker('exec',name,'node','--input-type=module','-e',`import fs from 'node:fs';try{fs.writeFileSync('/app/readonly-smoke','x');process.exit(1);}catch(e){if(!['EROFS','EACCES'].includes(e.code))throw e;}`);
  // Disposable smoke-test identity only; no real credentials are baked in the image.
- await docker('exec',name,'node','--input-type=module','-e',`import {createIdentityStore} from './security.mjs';const s=createIdentityStore('/data');try{await s.createAdmin('smoketest','Smoke test','Smoke test only passphrase 268',{mfa:false});}finally{s.close();}`);
+ await docker('exec',name,'node','--input-type=module','-e',`import {createIdentityStore} from './security.mjs';const s=createIdentityStore('/data');try{await s.createAdmin('smoketest','Smoke test','Smoke test only passphrase 268');}finally{s.close();}`);
  const login=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json',Origin:base},body:JSON.stringify({username:'smoketest',password:'Smoke test only passphrase 268'})});assert.equal(login.status,200);
  const cookie=login.headers.get('set-cookie').split(';')[0],identity=await login.json();
  const created=await fetch(base+'/api/rooms',{method:'POST',headers:{'Content-Type':'application/json',Origin:base,Cookie:cookie,'X-CSRF-Token':identity.csrf},body:JSON.stringify({name:'Container persistence',country:'FR'})});assert.equal(created.status,201);const campaign=(await created.json()).room;

@@ -8,18 +8,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createGameServer } from '../server.mjs';
-import { securityConfig,createIdentityStore,hashPassword,verifyPassword,digest,totp,passwordPolicy,randomToken } from '../security.mjs';
+import { securityConfig,createIdentityStore,hashPassword,verifyPassword,digest,passwordPolicy,randomToken } from '../security.mjs';
 import { scenario } from '../scenario.mjs';
 const password='Test-only passphrase 42!';
-async function setup(t,{mfa=false,config=securityConfig({}),fetchAI,bootstrap=true}={}){
+async function setup(t,{config=securityConfig({}),fetchAI,bootstrap=true}={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'historia-security-'));let time=Date.now();
  const server=createGameServer({dataDir:dir,config,fetchAI,clock:()=>time});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(async()=>{if(server.listening)await new Promise(r=>server.close(r));fs.rmSync(dir,{force:true,recursive:true});});
  const base=`http://127.0.0.1:${server.address().port}`,cookies=new Map();
  async function req(route,body,session,headers={},method){const response=await fetch(base+'/api'+route,{method:method||(body?'POST':'GET'),headers:{...(body?{'Content-Type':'application/json',Origin:base}:{}),...(session?{Cookie:session.cookie,'X-CSRF-Token':session.csrf}:{}),...headers},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();if(response.status===202&&data.job){let job=data.job;for(let i=0;job.state==='pending'&&i<300;i++){await new Promise(r=>setTimeout(r,10));const poll=await fetch(base+'/api/jobs/'+job.id,{headers:{Cookie:session.cookie}});const status=await poll.json();if(!poll.ok)return{status:poll.status,data:status};job=status.job;}assert.notEqual(job.state,'pending','AI job did not finish');return job.state==='failed'?{status:job.error.status,data:{error:job.error.message}}:{status:200,data:job.result};}const cookie=response.headers.get('set-cookie')?.split(';')[0];return {status:response.status,data,headers:response.headers,...(cookie?{cookie,csrf:data.csrf}:{})};}
  let administrator,admin;
- if(bootstrap){administrator=await server.identity.createAdmin('owner','Owner',password,{mfa});admin=await req('/auth/login',{username:'owner',password,otp:mfa?totp(administrator.secret,Math.floor(time/30000)):''});assert.equal(admin.status,200);}
- async function member(name='playerone',invite){const i=invite||server.identity.newInvite(administrator.user.id).invite;const r=await req('/auth/register',{username:name,name,password,invite:i,role:'admin'});assert.equal(r.status,200);return r;}
+ if(bootstrap){administrator=await server.identity.createAdmin('owner','Owner',password);admin=await req('/auth/login',{username:'owner',password});assert.equal(admin.status,200);}
+ async function member(name='playerone',invite){const r=await req('/auth/register',{username:name,name,password,role:'admin'});assert.equal(r.status,200);return r;}
  async function room(owner=admin,country='FR'){const r=await req('/rooms',{name:'Security test',country,mapMode:'strategy'},owner);assert.equal(r.status,201);return r.data.room;}
  async function join(r,who,country){const h=await req(`/rooms/${r.id}/invite`,{},admin);return req(`/rooms/${r.id}/join`,{country,invite:h.data.invite},who);}
  return {server,store:server.identity,dir,base,req,admin,administrator,member,room,join,clock:()=>time,advance:ms=>time+=ms};
@@ -36,14 +36,12 @@ test('passwords use unique salted memory-hard hashes; Unicode passphrases are su
  const a=await hashPassword(password),b=await hashPassword(password);assert.notEqual(a,b);assert(a.startsWith('scrypt$32768$8$3$'));assert(!a.includes(password));assert(await verifyPassword(password,a));assert(!(await verifyPassword('incorrect',a)));
  assert.throws(()=>passwordPolicy('short'),/15/);assert.throws(()=>passwordPolicy('x'.repeat(129)),/128/);assert.throws(()=>passwordPolicy('x'.repeat(20)),/common/);assert.doesNotThrow(()=>passwordPolicy('A sentence with spaces and 🌏 642'));
 });
-test('invitation registration is single-use and cannot assign administrator privileges',async t=>{
- const f=await setup(t),i=await f.req('/admin/invite',{},f.admin);assert.equal(i.status,201);
- const user=await f.member('playerone',i.data.invite);assert.equal(user.data.user.role,'member');
- assert.equal((await f.req('/auth/register',{username:'playertwo',name:'Player',password,invite:i.data.invite})).status,400);
- assert.equal((await f.req('/auth/register',{username:'uninvited',name:'Player',password,invite:randomToken()})).status,400);
- const admin=await f.req('/admin',null,f.admin);assert(!JSON.stringify(admin.data).includes(i.data.invite));assert(!JSON.stringify(admin.data).includes(password));assert(!JSON.stringify(admin.data).includes('password_hash'));
- assert.equal(f.store.db.prepare('SELECT used_by FROM invites WHERE id=?').get(i.data.id).used_by,user.data.user.id);
+test('open registration works without invitation and cannot self-assign administrator privileges',async t=>{
+ const f=await setup(t,{bootstrap:false}),user=await f.member();assert.equal(user.data.user.role,'member');assert.equal((await f.req('/admin',null,user)).status,403);
+ const other=await f.member('secondplayer');assert.equal(other.status,200);assert.equal((await f.req('/auth/register',{username:'playerone',name:'Duplicate',password})).status,400);
+ assert.equal(f.store.hasAdmin(),false);assert(!JSON.stringify(user.data).includes('password_hash'));
 });
+
 test('cookies are HttpOnly/SameSite; session tokens are hashed and login/logout rotate or revoke',async t=>{
  const f=await setup(t);assert.match(f.admin.headers.get('set-cookie'),/HttpOnly/);assert.match(f.admin.headers.get('set-cookie'),/SameSite=Strict/);
  const raw=f.admin.cookie.split('=')[1],row=f.store.db.prepare('SELECT * FROM sessions').get();assert.equal(row.hash,digest(raw));assert(!JSON.stringify(row).includes(raw));
@@ -54,14 +52,14 @@ test('origin, CSRF and Host checks reject forged browser requests and DNS rebind
  const f=await setup(t);
  assert.equal((await f.req('/auth/login',{username:'owner',password},null,{Origin:'https://evil.example'})).status,403);
  assert.equal((await f.req('/auth/login',{username:'owner',password},null,{Origin:''})).status,403);
- assert.equal((await f.req('/admin/invite',{},f.admin,{'X-CSRF-Token':'forged'})).status,403);
- assert.equal((await f.req('/admin/invite',{},f.admin,{'Sec-Fetch-Site':'cross-site'})).status,403);
+ assert.equal((await f.req('/admin/revoke-sessions',{id:f.administrator.user.id},f.admin,{'X-CSRF-Token':'forged'})).status,403);
+ assert.equal((await f.req('/admin/revoke-sessions',{id:f.administrator.user.id},f.admin,{'Sec-Fetch-Site':'cross-site'})).status,403);
  const rawStatus=await new Promise(resolve=>{const r=http.get(f.base+'/api/auth/session',{headers:{Host:'evil.example:3000'}},res=>{res.resume();resolve(res.statusCode);});r.on('error',()=>resolve(0));});assert.equal(rawStatus,403);
  const headers=(await f.req('/health')).headers;assert.equal(headers.get('x-frame-options'),'DENY');assert.match(headers.get('content-security-policy'),/script-src 'self'/);assert.match(headers.get('content-security-policy'),/frame-ancestors 'none'/);
 });
 test('player, campaign host and administrator permissions stay distinct',async t=>{
  const f=await setup(t),player=await f.member();
- assert.equal((await f.req('/admin',null,player)).status,403);assert.equal((await f.req('/admin/invite',{},player)).status,403);
+ assert.equal((await f.req('/admin',null,player)).status,403);assert.equal((await f.req('/admin/revoke-sessions',{id:f.administrator.user.id},player)).status,403);
  assert.equal((await f.req('/admin/user-status',{id:f.administrator.user.id,disabled:true},player)).status,403);
  const r=await f.room(player);assert.equal((await f.req(`/rooms/${r.id}`,null,f.admin)).status,403);
  assert.equal((await f.req(`/rooms/${r.id}/config`,{mode:'demo',endpoint:'http://localhost:11434',model:'',months:1},player)).status,200);
@@ -91,20 +89,19 @@ test('login errors do not enumerate accounts and repeated guessing is throttled 
  assert.equal((await f.req('/auth/login',{username:'owner',password},null,{'X-Forwarded-For':'203.0.113.55'})).status,429);
  f.advance(16*60000);assert.equal((await f.req('/auth/login',{username:'owner',password})).status,200);
 });
-test('authenticator codes are checked, encrypted at rest and cannot be replayed',async t=>{
- assert.equal(totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',1),'287082');
- const f=await setup(t,{mfa:true});const stored=f.store.findUser(f.administrator.user.id);assert(stored.mfa);assert(!stored.mfa.includes(f.administrator.secret));
- assert.equal((await f.req('/auth/login',{username:'owner',password})).status,401);
- const code=totp(f.administrator.secret,Math.floor(f.clock()/30000));assert.equal((await f.req('/auth/login',{username:'owner',password,otp:code})).status,401);
- f.advance(30000);assert.equal((await f.req('/auth/login',{username:'owner',password,otp:totp(f.administrator.secret,Math.floor(f.clock()/30000))})).status,200);
+test('administrators use password-only login with no MFA secrets or enrollment',async t=>{
+ const f=await setup(t);assert.equal((await f.req('/auth/login',{username:'owner',password})).status,200);
+ assert(!('mfa' in f.store.publicUser(f.store.findUser(f.administrator.user.id))));assert(!fs.existsSync(path.join(f.dir,'.mfa-key')));
 });
-test('idle sessions expire and administrator mutations need recent identity confirmation',async t=>{
- const f=await setup(t);f.advance(11*60000);
- assert.equal((await f.req('/admin/invite',{},f.admin)).status,428);
+
+test('idle sessions expire and administrator mutations need recent password confirmation',async t=>{
+ const f=await setup(t),u=await f.member();f.advance(11*60000);
+ assert.equal((await f.req('/admin/revoke-sessions',{id:u.data.user.id},f.admin)).status,428);
  const confirmed=await f.req('/auth/reauth',{password},f.admin);assert.equal(confirmed.status,200);assert.notEqual(confirmed.cookie,f.admin.cookie);
- assert.equal((await f.req('/admin/invite',{},confirmed)).status,201);
+ assert.equal((await f.req('/admin/revoke-sessions',{id:u.data.user.id},confirmed)).status,200);
  f.advance(16*60000);assert.equal((await f.req('/admin',null,confirmed)).status,401);
 });
+
 test('campaign invitations are required, expire, and rotate; another account cannot claim a seat',async t=>{
  const f=await setup(t),u=await f.member(),r=await f.room();
  assert.equal((await f.req(`/rooms/${r.id}/join`,{country:'DE'},u)).status,403);
@@ -131,44 +128,39 @@ test('Ollama allowlisting blocks arbitrary URLs; request payloads and methods ar
  assert.equal((await f.req(`/rooms/${r.id}/orders/extra`,{},f.admin)).status,404);
  assert.equal((await f.req(`/rooms/${r.id}`,{},f.admin,{},'PUT')).status,405);
 });
-test('public deployments retain an HTTPS browser origin and MFA key but accept plain backend HTTP',async t=>{
+test('public deployments require HTTPS browser origin but no MFA secret and accept backend HTTP',async t=>{
  assert.throws(()=>securityConfig({PUBLIC_ORIGIN:'http://game.example'}),/HTTPS/);
- const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'historia-key-'));try{assert.throws(()=>createIdentityStore(tmp,{production:true}),/MFA_ENCRYPTION_KEY/);}finally{fs.rmSync(tmp,{recursive:true,force:true});}
- const config=securityConfig({PUBLIC_ORIGIN:'https://game.example',MFA_ENCRYPTION_KEY:randomToken()});
+ const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'historia-key-'));try{const store=createIdentityStore(tmp,{production:true});store.close();}finally{fs.rmSync(tmp,{recursive:true,force:true});}
+ const config=securityConfig({PUBLIC_ORIGIN:'https://game.example'});
  const f=await setup(t,{config,bootstrap:false});
  const status=headers=>new Promise((resolve,reject)=>{const request=http.get(f.base+'/api/auth/session',{headers},res=>{res.resume();resolve(res.statusCode);});request.on('error',reject);});
  assert.equal(await status({Host:'game.example'}),200);
  assert.equal(await status({Host:'evil.example','X-Forwarded-Host':'game.example'}),400);
 });
-test('one account invitation cannot be redeemed by two concurrent registrations',async t=>{
- const f=await setup(t),i=f.store.newInvite(f.administrator.user.id);
- const results=await Promise.all(['firstuser','seconduser'].map(username=>f.req('/auth/register',{username,name:username,password,invite:i.invite})));
- assert.deepEqual(results.map(r=>r.status).sort(),[200,400]);
+test('concurrent public signups cannot create duplicate usernames',async t=>{
+ const f=await setup(t);const results=await Promise.all([1,2].map(()=>f.req('/auth/register',{username:'duplicate',name:'Player',password})));
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,400]);assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM users WHERE username=?').get('duplicate').n,1);
 });
+
 test('Secure host-only cookies and HSTS work without trusted proxies or forwarding headers',async t=>{
- const config=securityConfig({PUBLIC_ORIGIN:'https://game.example',MFA_ENCRYPTION_KEY:randomToken()});
+ const config=securityConfig({PUBLIC_ORIGIN:'https://game.example'});
  const f=await setup(t,{config,bootstrap:false}),admin=await f.store.createAdmin('secureowner','Owner',password);
- const data=JSON.stringify({username:'secureowner',password,otp:totp(admin.secret,Math.floor(f.clock()/30000))});
+ const data=JSON.stringify({username:'secureowner',password});
  const result=await new Promise((resolve,reject)=>{const request=http.request(f.base+'/api/auth/login',{method:'POST',headers:{Host:'game.example',Origin:'https://game.example','Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body}));});request.on('error',reject);request.end(data);});
  assert.equal(result.status,200);assert.match(result.headers['set-cookie'][0],/^__Host-historia_session=/);assert.match(result.headers['set-cookie'][0],/; Secure/);assert.match(result.headers['set-cookie'][0],/HttpOnly/);assert.equal(result.headers['strict-transport-security'],'max-age=31536000');
 });
-test('expired and revoked invitations cannot register accounts or join campaigns',async t=>{
- const f=await setup(t),old=f.store.newInvite(f.administrator.user.id),revoked=f.store.newInvite(f.administrator.user.id);
- f.store.revokeInvite(f.administrator.user.id,revoked.id);
- assert.equal((await f.req('/auth/register',{username:'revokeduser',name:'Revoked',password,invite:revoked.invite})).status,400);
- const u=await f.member(),r=await f.room(),inv=await f.req(`/rooms/${r.id}/invite`,{},f.admin);
- f.advance(26*3600000);const login=await f.req('/auth/login',{username:'playerone',password});assert.equal(login.status,200);
- assert.equal((await f.req(`/rooms/${r.id}/join`,{country:'DE',invite:inv.data.invite},login)).status,403);
- f.advance(7*86400000);assert.equal((await f.req('/auth/register',{username:'expireduser',name:'Expired',password,invite:old.invite})).status,400);
+test('one reusable campaign link admits different accounts midgame until expiry or rotation',async t=>{
+ const f=await setup(t),u=await f.member(),v=await f.member('secondplayer'),r=await f.room(),inv=await f.req(`/rooms/${r.id}/invite`,{},f.admin);
+ await f.req(`/rooms/${r.id}/config`,{mode:'demo',endpoint:'http://localhost:11434',model:'',months:1},f.admin);await f.req(`/rooms/${r.id}/ready`,{ready:true},f.admin);assert.equal((await f.req(`/rooms/${r.id}/advance`,{},f.admin)).data.round,2);
+ assert.equal((await f.req(`/rooms/${r.id}/join`,{country:'DE',invite:inv.data.invite},u)).status,201);
+ assert.equal((await f.req(`/rooms/${r.id}/join`,{country:'IT',invite:inv.data.invite},v)).status,201);
+ f.advance(8*86400000);const w=await f.member('thirdplayer');assert.equal((await f.req(`/rooms/${r.id}/join`,{country:'GB',invite:inv.data.invite},w)).status,403);
 });
-test('Docker secret files and AI resource settings are validated before startup',()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'historia-secret-'));try{
- const file=path.join(dir,'key');fs.writeFileSync(file,'ab'.repeat(32)+'\n',{mode:0o600});
- const config=securityConfig({MFA_ENCRYPTION_KEY_FILE:file,AI_MAX_CONCURRENCY:'1',AI_CONTEXT_LENGTH:'8192',AI_TIMEOUT_SECONDS:'240',AI_THINK:'off'});
- assert.equal(config.mfaKey,'ab'.repeat(32));assert.equal(config.aiConcurrency,1);assert.equal(config.aiContext,8192);assert.equal(config.aiTimeout,240000);assert.equal(config.aiThink,false);
- assert.throws(()=>securityConfig({MFA_ENCRYPTION_KEY_FILE:file,MFA_ENCRYPTION_KEY:'cd'.repeat(32)}),/both|one/i);
+
+test('AI resource settings validate without MFA deployment secrets',()=>{
+ const config=securityConfig({PUBLIC_ORIGIN:'https://game.example.com',AI_MAX_CONCURRENCY:'1',AI_CONTEXT_LENGTH:'8192',AI_TIMEOUT_SECONDS:'240',AI_THINK:'off'});
+ assert.equal(config.aiConcurrency,1);assert.equal(config.aiContext,8192);assert.equal(config.aiTimeout,240000);assert.equal(config.aiThink,false);assert(!('mfaKey' in config));
  for(const bad of [{AI_MAX_CONCURRENCY:'3'},{AI_CONTEXT_LENGTH:'100'},{AI_TIMEOUT_SECONDS:'0'},{AI_THINK:'maybe'}])assert.throws(()=>securityConfig(bad));
- }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('turn timer controls require campaign host, CSRF, valid duration and current round',async t=>{
@@ -332,7 +324,7 @@ test('more than thirty distinct login attempts from one proxy do not lock out an
  const f=await setup(t);for(let i=0;i<31;i++)assert.equal((await f.req('/auth/login',{username:'unknown'+i,password:'wrong'})).status,401);
  assert.equal((await f.req('/auth/login',{username:'owner',password},null,{'X-Forwarded-For':'203.0.113.8'})).status,200);
 });
-test('registration invitation limits allow more than ten different invited players behind one proxy',async t=>{
+test('open signup allows more than ten different players behind one proxy',async t=>{
  const f=await setup(t);for(let i=0;i<11;i++)assert.equal((await f.member('member'+i)).status,200);
 });
 test('global request burst protection refills quickly and does not depend on forwarded headers',async t=>{
@@ -346,7 +338,7 @@ function slowMutation(f,route,value,who){
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 test('delayed join uses the latest committed room and cannot rewind or overwrite it',async t=>{
  const f=await setup(t),u=await f.member(),r=await f.room(),invite=(await f.req(`/rooms/${r.id}/invite`,{},f.admin)).data.invite;await f.req(`/rooms/${r.id}/config`,{mode:'demo',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);
- const delayed=slowMutation(f,`/rooms/${r.id}/join`,{country:'DE',invite},u);await pause(30);await f.req(`/rooms/${r.id}/ready`,{ready:true},f.admin);assert.equal((await f.req(`/rooms/${r.id}/advance`,{},f.admin)).data.round,2);delayed.finish();assert.equal((await delayed.done).status,201);
+ const delayed=slowMutation(f,`/rooms/${r.id}/join`,{country:'DE',invite},u);await pause(30);await f.req(`/rooms/${r.id}/config`,{mode:'demo',endpoint:'http://localhost:11434',model:'',months:1},f.admin);await f.req(`/rooms/${r.id}/ready`,{ready:true},f.admin);assert.equal((await f.req(`/rooms/${r.id}/advance`,{},f.admin)).data.round,2);delayed.finish();assert.equal((await delayed.done).status,201);
  const state=(await f.req(`/rooms/${r.id}`,null,f.admin)).data;assert.equal(state.round,2);assert.equal(state.phase,'planning');assert.equal(state.history.length,1);assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,r.id+'.json'))).round,2);
 });
 test('body completion rechecks account revocation and removed campaign membership',async t=>{
@@ -388,4 +380,66 @@ test('twelve-player maximum-policy turn is staged through Ollama with every requ
  const sessions=[f.admin];for(const [i,c]of r.world.countries.filter(c=>c.id!=='FR').slice(0,11).entries()){const u=await f.member('contextuser'+i);await f.join(r,u,c.id);sessions.push(u);}
  for(let i=0;i<sessions.length;i++){const orders=Array.from({length:3},(_,j)=>({type:'policy',text:(`Plan ${i}-${j}: `+'Recognize a small independent republic peacefully. '.repeat(80)).slice(0,2000)}));assert.equal((await f.req(`/rooms/${r.id}/orders`,{orders},sessions[i])).status,200);await f.req(`/rooms/${r.id}/ready`,{ready:true},sessions[i]);}
  const next=await f.req(`/rooms/${r.id}/advance`,{},f.admin);assert.equal(next.status,200);assert.equal(next.data.round,2);assert.equal(seen.size,36);assert.equal(finals,1);assert(calls>1);for(const p of next.data.history[0].orders)for(let j=0;j<p.orders.length;j++)assert.equal(seen.get(`${next.data.players.find(x=>x.country===p.country).id}:${j}`),p.orders[j].text);assert.equal(next.data.world.regions.find(p=>p.id==='GB1').owner,'IE');
+});
+
+test('public registration has global and username rate limits independent of forwarded IP',async t=>{
+ const f=await setup(t);for(let i=0;i<30;i++)f.store.throttle('register-global',30,60000);
+ assert.equal((await f.req('/auth/register',{username:'bounded',name:'Bounded',password},null,{'X-Forwarded-For':'198.51.100.3'})).status,429);
+ f.advance(61000);assert.equal((await f.member('bounded')).status,200);
+});
+test('admin can add accounts midgame and safely reassign or swap nations without inheriting private state',async t=>{
+ const f=await setup(t),u=await f.member(),v=await f.member('thirdplayer'),r=await f.room();
+ await f.req(`/rooms/${r.id}/config`,{mode:'demo',endpoint:'http://localhost:11434',model:'',months:1},f.admin);await f.req(`/rooms/${r.id}/ready`,{ready:true},f.admin);await f.req(`/rooms/${r.id}/advance`,{},f.admin);
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'DE'},u)).status,403);
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'DE'},f.admin)).status,200);
+ const before=(await f.req(`/rooms/${r.id}`,null,u)).data;await f.req(`/rooms/${r.id}/orders`,{orders:[{type:'invest'}]},u);await f.req(`/rooms/${r.id}/chat`,{to:'FR',text:'Private old government'},u);
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'thirdplayer',country:'DE'},f.admin)).status,409);
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'IT'},f.admin)).status,200);
+ const next=(await f.req(`/rooms/${r.id}`,null,u)).data;assert.notEqual(next.me,before.me);assert.equal(next.players.find(p=>p.id===next.me).country,'IT');assert.deepEqual(next.players.find(p=>p.id===next.me).orders,[]);assert(!next.messages.some(m=>m.text.includes('Private old')));
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'thirdplayer',country:'DE'},f.admin)).status,200);
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'DE',swap:true},f.admin)).status,200);
+ const state=(await f.req('/admin/campaign/'+r.id,null,f.admin)).data;assert.equal(state.players.find(p=>p.username==='playerone').country,'DE');assert.equal(state.players.find(p=>p.username==='thirdplayer').country,'IT');
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'owner',country:'GB'},f.admin)).status,200);
+ const hostView=(await f.req(`/rooms/${r.id}`,null,f.admin)).data;assert.equal(hostView.me,hostView.hostId);assert(hostView.config);assert.equal((await f.req('/admin/campaign/'+r.id,null,u)).status,403);
+});
+test('an admin outside the campaign can privately assess victory, publish it and reopen play',async t=>{
+ let calls=0;const secret='PRIVATE CRITERION: French stability at least 50';
+ const f=await setup(t,{fetchAI:async(url,opts)=>{calls++;const p=JSON.parse(opts.body),input=JSON.parse(p.messages[1].content);assert.equal(input.criteria,secret);assert(!JSON.stringify(input).includes('PRIVATE CHAT'));assert(!JSON.stringify(input).includes('UNSUBMITTED POLICY'));assert.equal(p.options.num_ctx,32768);return Response.json({message:{content:JSON.stringify({met:true,winners:['FR'],reason:'France meets the stability threshold in the current world.'})}});}}),u=await f.member(),r=await f.room(u);
+ await f.req(`/rooms/${r.id}/config`,{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},u);
+ await f.req(`/rooms/${r.id}/orders`,{orders:[{type:'policy',text:'UNSUBMITTED POLICY'}]},u);
+ assert.equal((await f.req('/admin/victory-config',{id:r.id,criteria:secret},u)).status,403);
+ assert.equal((await f.req('/admin/victory-config',{id:r.id,criteria:secret},f.admin)).status,200);
+ const ordinary=(await f.req(`/rooms/${r.id}`,null,u)).data,exported=(await f.req(`/rooms/${r.id}/export`,null,u)).data;assert(!JSON.stringify(ordinary).includes(secret));assert(!JSON.stringify(exported).includes(secret));
+ const result=await f.req('/admin/victory-assess',{id:r.id},f.admin);assert.equal(result.status,200);assert.equal(result.data.assessment.met,true);assert.equal(calls,1);
+ assert.equal((await f.req('/admin/victory-declare',{id:r.id,assessmentId:result.data.assessment.id,message:'France wins the campaign.'},f.admin)).status,200);
+ const done=(await f.req(`/rooms/${r.id}`,null,u)).data;assert.equal(done.phase,'finished');assert.equal(done.victory.winners[0].country,'FR');assert.equal(done.victory.message,'France wins the campaign.');assert(!JSON.stringify(done).includes(secret));
+ assert.equal((await f.req(`/rooms/${r.id}/ready`,{ready:true},u)).status,409);
+ assert.equal((await f.req('/admin/victory-reopen',{id:r.id},f.admin)).status,200);assert.equal((await f.req(`/rooms/${r.id}`,null,u)).data.phase,'planning');
+});
+test('victory refuses invented winners, repairs once, and stale recommendations cannot finish a changed campaign',async t=>{
+ let calls=0;const f=await setup(t,{fetchAI:async()=>Response.json({message:{content:JSON.stringify({met:true,winners:[++calls===1?'MISSING':'FR'],reason:'Measured criteria met.'})}})}),r=await f.room();
+ await f.req(`/rooms/${r.id}/config`,{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);await f.req('/admin/victory-config',{id:r.id,criteria:'France wins if stable.'},f.admin);
+ const result=await f.req('/admin/victory-assess',{id:r.id},f.admin);assert.equal(result.status,200);assert.equal(calls,2);
+ await f.req('/admin/victory-config',{id:r.id,criteria:'France needs ten provinces.'},f.admin);
+ assert.equal((await f.req('/admin/victory-declare',{id:r.id,assessmentId:result.data.assessment.id,message:'Premature winner'},f.admin)).status,409);assert.equal((await f.req(`/rooms/${r.id}`,null,f.admin)).data.phase,'planning');
+});
+test('in-flight AI replies cannot survive administrator nation reassignment',async t=>{
+ let release,start;const gate=new Promise(r=>release=r),began=new Promise(r=>start=r);const f=await setup(t,{fetchAI:async()=>{start();await gate;return Response.json({message:{content:'STALE GOVERNMENT REPLY'}});}}),u=await f.member(),r=await f.room();await f.join(r,u,'DE');await f.req(`/rooms/${r.id}/config`,{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);
+ const reply=f.req(`/rooms/${r.id}/chat`,{to:'IT',text:'Old government message'},u);await began;
+ assert.equal((await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'GB'},f.admin)).status,200);release();assert.equal((await reply).status,409);assert(!(await f.req(`/rooms/${r.id}`,null,u)).data.messages.some(m=>m.text.includes('STALE')));
+});
+test('a no-winner recommendation cannot be declared and changed criteria invalidate in-flight evaluation',async t=>{
+ let release,start,block=false;const gate=new Promise(r=>release=r),began=new Promise(r=>start=r);
+ const f=await setup(t,{fetchAI:async()=>{if(block){start();await gate;}return Response.json({message:{content:JSON.stringify({met:false,winners:[],reason:'No eligible player meets the objective yet.'})}});}}),r=await f.room();
+ await f.req(`/rooms/${r.id}/config`,{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);await f.req('/admin/victory-config',{id:r.id,criteria:'Own twenty provinces.'},f.admin);
+ const no=await f.req('/admin/victory-assess',{id:r.id},f.admin);assert.equal(no.status,200);assert.equal(no.data.assessment.met,false);
+ assert.equal((await f.req('/admin/victory-declare',{id:r.id,assessmentId:no.data.assessment.id,message:'No winner'},f.admin)).status,409);
+ block=true;const pending=f.req('/admin/victory-assess',{id:r.id},f.admin);await began;await f.req('/admin/victory-config',{id:r.id,criteria:'Own thirty provinces.'},f.admin);release();assert.equal((await pending).status,409);
+ assert.equal((await f.req('/admin/campaign/'+r.id,null,f.admin)).data.victory.assessment,null);
+});
+test('stale browser orders/readiness after nation reassignment are rejected by seat identity',async t=>{
+ const f=await setup(t),u=await f.member(),r=await f.room();await f.join(r,u,'DE');const before=(await f.req(`/rooms/${r.id}`,null,u)).data;
+ await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'IT'},f.admin);
+ for(const [action,body]of [['orders',{orders:[{type:'invest'}]}],['ready',{ready:true}]])assert.equal((await f.req(`/rooms/${r.id}/${action}`,{...body,_seat:before.me},u)).status,409);
+ const next=(await f.req(`/rooms/${r.id}`,null,u)).data;assert.equal((await f.req(`/rooms/${r.id}/orders`,{orders:[{type:'invest'}],_seat:next.me},u)).status,200);
 });

@@ -1,6 +1,6 @@
 > **Version 3:** See PARITY.md for freshly verified public sources, the current comparison and remaining gaps. The following is the archived initial prototype research, not the current feature list.
 
-> **Version 2 update:** This document records the initial gameplay research and prototype design. Browser bearer access described below has been superseded by password accounts, administrator MFA, cookie sessions and invitations. See README.md and SECURITY.md for the current build.
+> **Version 2 update:** This document records the initial gameplay research and prototype design. Browser bearer access described below has been superseded by password accounts, password-only administrators, cookie sessions, open signup and campaign invitations. See README.md and SECURITY.md for the current build.
 
 # Research: a local multiplayer Pax Historia alternative
 
