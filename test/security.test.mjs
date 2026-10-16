@@ -377,3 +377,15 @@ test('a queued NPC message is rejected before generation when a human claims tha
  let release,started,calls=0;const gate=new Promise(r=>release=r),began=new Promise(r=>started=r);const f=await setup(t,{fetchAI:async()=>{calls++;started();await gate;return Response.json({message:{content:'A reply'}});}}),u=await f.member(),v=await f.member('newgovernment'),r=await f.room();await f.join(r,u,'DE');await f.req(`/rooms/${r.id}/config`,{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);
  const first=f.req(`/rooms/${r.id}/advisor`,{text:'Hold slot'},f.admin);await began;const pending=f.req(`/rooms/${r.id}/chat`,{to:'IT',text:'To the NPC'},u);await pause(30);assert.equal((await f.join(r,v,'IT')).status,201);release();assert.equal((await first).status,200);assert.equal((await pending).status,409);assert.equal(calls,1);
 });
+
+test('twelve-player maximum-policy turn is staged through Ollama with every request under 20K',async t=>{
+ let calls=0,finals=0;const seen=new Map();const {requestTokenBound}=await import('../context.mjs');
+ const f=await setup(t,{fetchAI:async(url,opts)=>{calls++;const payload=JSON.parse(opts.body);assert.equal(payload.options.num_ctx,20000);assert(requestTokenBound(payload.messages,payload.format)+payload.options.num_predict+512<=20000);const input=JSON.parse(payload.messages[1].content);let result;
+  if(input.phase==='policyBatch'){for(const p of input.policyBatch)seen.set(`${p.playerId}:${p.orderIndex}`,p.text);result={policies:input.policyBatch.map(p=>({playerId:p.playerId,orderIndex:p.orderIndex,outcome:'Recognition is sought.',intent:'Support independent tea states.'}))};}
+  else {assert.equal(input.phase,'worldResolution');finals++;result={events:[{title:'The tea border',body:'A settlement changes British territory.'}],mapChanges:[{type:'transfer',country:'GB',targetCountry:'IE',provinces:['GB1']}]};}
+  return Response.json({message:{content:JSON.stringify(result)}});
+ }}),r=await f.room();await f.req(`/rooms/${r.id}/config`,{mapMode:'wild',mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1},f.admin);
+ const sessions=[f.admin];for(const [i,c]of r.world.countries.filter(c=>c.id!=='FR').slice(0,11).entries()){const u=await f.member('contextuser'+i);await f.join(r,u,c.id);sessions.push(u);}
+ for(let i=0;i<sessions.length;i++){const orders=Array.from({length:3},(_,j)=>({type:'policy',text:(`Plan ${i}-${j}: `+'Recognize a small independent republic peacefully. '.repeat(80)).slice(0,2000)}));assert.equal((await f.req(`/rooms/${r.id}/orders`,{orders},sessions[i])).status,200);await f.req(`/rooms/${r.id}/ready`,{ready:true},sessions[i]);}
+ const next=await f.req(`/rooms/${r.id}/advance`,{},f.admin);assert.equal(next.status,200);assert.equal(next.data.round,2);assert.equal(seen.size,36);assert.equal(finals,1);assert(calls>1);for(const p of next.data.history[0].orders)for(let j=0;j<p.orders.length;j++)assert.equal(seen.get(`${next.data.players.find(x=>x.country===p.country).id}:${j}`),p.orders[j].text);assert.equal(next.data.world.regions.find(p=>p.id==='GB1').owner,'IE');
+});

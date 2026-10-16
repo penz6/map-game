@@ -38,3 +38,6 @@ Requested context and concurrency can be reduced by the server operator for smal
 
 
 Version 3.4 Wild Map responses may include agreements for NPC treaty/unification consent or breaking treaties, using normal costs and reciprocal order rules. Strategy responses must leave mapChanges empty. Chat promises alone are not binding. NPC exchanges and advisor questions are packed when their queued job acquires the generation slot, after preceding committed replies, rather than at initial submission. Full resolution is simulated before accepting a proposal so post-order conflicts can receive one correction. AI endpoints return background jobs; the browser polls their account-private result.
+
+
+Version 3.5 stages oversized turns under a 20,000 total context ceiling. Editable turn text is used in policy/world passes, followed by phase-specific fixed contracts. Policy batches return provisional outcomes and intents; only the final world pass selects map consequences. A separate fixed text-compression task is used only when a full individual source plus necessary state will not fit. Final intent summaries are lossy and original orders remain saved. The model never receives arbitrary code/tool authority in any phase.

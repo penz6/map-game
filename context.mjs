@@ -59,6 +59,7 @@ export function worldContext(room, player, nearby) {
 }
 
 export function compactRequest({ room, messages, format, contextLength, outputTokens }) {
+  check(Number.isInteger(contextLength)&&contextLength<=20000,'AI context cannot exceed the 20,000-token application ceiling.',413);
   const budget = contextLength - outputTokens - 512; // template/system framing safety margin
   check(budget > 0, 'AI context is too small for the configured output reserve.');
   const input = JSON.parse(messages[1].content);
@@ -106,6 +107,6 @@ export function compactRequest({ room, messages, format, contextLength, outputTo
   while (!fits() && dialogue.length) { dialogue.shift(); update(); }
   while (!fits() && diplomacy.length) { diplomacy.shift(); update(); }
   if (!fits() && recent.length) { recent = []; update(); }
-  check(fits(), 'Essential AI input exceeds the context budget. Shorten the system prompt, world premise, message or submitted policies, or increase AI_CONTEXT_LENGTH. No orders or world changes were applied.', 413);
+  check(fits(), 'Essential AI input exceeds the context budget. Shorten the system prompt, world premise, message or submitted policies, or reduce scenario size/output reserve. The model is capped at 20,000 context. No orders or world changes were applied.', 413);
   return { messages: packed, inputBound: requestTokenBound(packed, format), inputBudget: budget, outputTokens, compacted: JSON.parse(packed[1].content).contextCompaction.compacted };
 }

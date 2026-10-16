@@ -7,7 +7,7 @@ const actionSchema={type:'object',additionalProperties:false,required:['country'
 export const turnSchema={type:'object',additionalProperties:false,required:['events','policies','npcOrders','mapChanges'],properties:{
  events:{type:'array',minItems:1,maxItems:8,items:{type:'object',additionalProperties:false,required:['title','body'],properties:{title:{type:'string'},body:{type:'string'}}}},
  policies:{type:'array',maxItems:60,items:{type:'object',additionalProperties:false,required:['playerId','orderIndex','outcome','treasury','economy','military','stability'],properties:{playerId:{type:'string'},orderIndex:{type:'integer'},outcome:{type:'string'},treasury:{type:'integer',minimum:-8,maximum:8},economy:{type:'integer',minimum:-5,maximum:5},military:{type:'integer',minimum:-5,maximum:5},stability:{type:'integer',minimum:-8,maximum:8},actions:{type:'array',maxItems:2,items:{$ref:'#/$defs/action'}}}}},
- mapChanges:{type:'array',maxItems:0,items:mapChangeSchema},
+ mapChanges:{type:'array',maxItems:0},
  npcOrders:{type:'array',maxItems:8,items:{$ref:'#/$defs/action'}}
 },$defs:{action:actionSchema}};
 export const directorTurnSchema={type:'object',additionalProperties:false,required:['events','policies','mapChanges'],properties:{events:turnSchema.properties.events,policies:{type:'array',maxItems:36,items:{type:'object',additionalProperties:false,required:['playerId','orderIndex','outcome'],properties:{playerId:{type:'string'},orderIndex:{type:'integer'},outcome:{type:'string'}}}},mapChanges:{type:'array',minItems:1,maxItems:4,items:mapChangeSchema},agreements:{type:'array',maxItems:8,items:{...actionSchema,properties:{country:actionSchema.properties.country,type:{type:'string',enum:['treaty','merge','breakTreaty']},targetCountry:actionSchema.properties.targetCountry,terms:actionSchema.properties.terms}}}}};
@@ -20,20 +20,7 @@ export function validateAI(room,ai){
  const npcInput=(wild?ai.agreements:ai.npcOrders)??[];
  if(wild)check(Array.isArray(npcInput)&&npcInput.every(o=>o&&['treaty','merge','breakTreaty'].includes(o.type)),'Director agreements support only treaty, merge or breakTreaty.',502);
  check(Array.isArray(ai.policies)&&Array.isArray(npcInput)&&npcInput.length<=8,'AI returned invalid orders.',502);
- const seen=new Set();
- const policies=ai.policies.map(p=>{
-  check(p&&typeof p==='object','AI policy must be an object.',502);
-  const player=room.players.find(x=>x.id===p.playerId);
-  check(player&&Number.isInteger(p.orderIndex)&&player.orders[p.orderIndex]?.type==='policy','AI referenced an unknown policy.',502);
-  const key=`${p.playerId}:${p.orderIndex}`;check(!seen.has(key),'AI duplicated a policy.',502);seen.add(key);
-  check(typeof p.outcome==='string'&&p.outcome.length>0&&p.outcome.length<=2000,'AI policy outcome is invalid.',502);
-  if(wild){check(!p.actions?.length,'Wild mode uses mapChanges, not per-player concrete action plans.',502);p={...p,treasury:0,economy:0,military:0,stability:0};}
-  for(const [k,limit] of Object.entries({treasury:8,economy:5,military:5,stability:8})) check(Number.isInteger(p[k])&&Math.abs(p[k])<=limit,'AI policy effects exceed the rules.',502);
-  check(p.actions===undefined||Array.isArray(p.actions)&&p.actions.length<=2,'A policy may execute at most two structured actions.',502);const actions=(p.actions||[]).map(o=>{check(o&&o.type!=='policy'&&o.country===player.country,'A policy cannot issue actions for another nation.',502);return validateOrders(room,player,[o])[0];});
-  return {playerId:p.playerId,orderIndex:p.orderIndex,outcome:p.outcome,treasury:p.treasury,economy:p.economy,military:p.military,stability:p.stability,actions};
- });
- for(const p of room.players)for(let i=0;i<p.orders.length;i++)if(p.orders[i].type==='policy')check(seen.has(`${p.id}:${i}`),'AI omitted a policy. Retry this turn.',502);
- for(const player of room.players)validateOrders(room,player,[...player.orders,...policies.filter(p=>p.playerId===player.id).flatMap(p=>p.actions)],{max:9});
+ const policies=validatePolicies(room,ai.policies);
  const mapChanges=ai.mapChanges||[];check(wild||Array.isArray(mapChanges)&&mapChanges.length===0,'Strategy mode cannot bypass orders/combat with director mapChanges.',502);const preview=applyMapChanges(room.world,mapChanges,room.players,{requireOwnershipChange:room.world.mapMode==='wild',seed:room.id+':'+room.round});
  const reserved=new Set(room.players.flatMap(p=>p.orders.filter(o=>['attack','move','cede','release'].includes(o.type)).map(o=>o.target)));check(!preview.changedProvinces.some(id=>reserved.has(id)),'Choose other provinces: a human movement, attack or territorial order already targets one of these provinces.',502);
  const used=new Set();
@@ -55,4 +42,23 @@ export function resolveTurn(room,ai){
   result.world=patch.world;const history=result.history.at(-1);history.events.push(...patch.events);history.mapChanges=patch.records;history.changedProvinces=patch.changedProvinces;
  }
  return result;
+}
+
+export function validatePolicies(room,input,{requireAll=true}={}){
+ const wild=room.world.mapMode==='wild';check(Array.isArray(input),'AI policies must be an array.',502);
+ const seen=new Set();
+ const policies=input.map(p=>{
+  check(p&&typeof p==='object','AI policy must be an object.',502);
+  const player=room.players.find(x=>x.id===p.playerId);
+  check(player&&Number.isInteger(p.orderIndex)&&player.orders[p.orderIndex]?.type==='policy','AI referenced an unknown policy.',502);
+  const key=`${p.playerId}:${p.orderIndex}`;check(!seen.has(key),'AI duplicated a policy.',502);seen.add(key);
+  check(typeof p.outcome==='string'&&p.outcome.length>0&&p.outcome.length<=2000,'AI policy outcome is invalid.',502);
+  if(wild){check(!p.actions?.length,'Wild mode uses mapChanges, not per-player concrete action plans.',502);p={...p,treasury:0,economy:0,military:0,stability:0};}
+  for(const [k,limit] of Object.entries({treasury:8,economy:5,military:5,stability:8})) check(Number.isInteger(p[k])&&Math.abs(p[k])<=limit,'AI policy effects exceed the rules.',502);
+  check(p.actions===undefined||Array.isArray(p.actions)&&p.actions.length<=2,'A policy may execute at most two structured actions.',502);const actions=(p.actions||[]).map(o=>{check(o&&o.type!=='policy'&&o.country===player.country,'A policy cannot issue actions for another nation.',502);return validateOrders(room,player,[o])[0];});
+  return {playerId:p.playerId,orderIndex:p.orderIndex,outcome:p.outcome,treasury:p.treasury,economy:p.economy,military:p.military,stability:p.stability,actions};
+ });
+ if(requireAll)for(const p of room.players)for(let i=0;i<p.orders.length;i++)if(p.orders[i].type==='policy')check(seen.has(`${p.id}:${i}`),'AI omitted a policy. Retry this turn.',502);
+ for(const player of room.players)validateOrders(room,player,[...player.orders,...policies.filter(p=>p.playerId===player.id).flatMap(p=>p.actions)],{max:9});
+ return policies;
 }

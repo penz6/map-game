@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createAIQueue } from './ai-queue.mjs';
 import { createAIJobs } from './ai-jobs.mjs';
+import { adjudicateBoundedTurn,assertWorldFits } from './turn-planner.mjs';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,7 +35,8 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const auth=(r,account)=>{check(!r.closed,'This campaign has been closed.',403);const p=r.players.find(p=>p.accountId===account.user.id);check(p,'You are not a member of this campaign.',403);return p;};
  const host=(r,p)=>check(r.hostId===p.id,'Only the host can do that.',403);
  const planning=r=>check(r.phase==='planning','Wait for the current world simulation to finish.',409);
- const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
+ const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,contextCeiling:20000,stagedTurns:true,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
+ const checkWorldCapacity=r=>{if(r.mode==='ollama')assertWorldFits(r,{contextLength:config.aiContext,outputTokens:config.aiTurnOutput});};
  const aiQueue=createAIQueue({concurrency:config.aiConcurrency}),jobs=createAIJobs({clock,maxActive:config.aiConcurrency+32});
  async function readAIJSON(response){const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;check(size<=1024*1024,'AI response exceeded the allowed size.',502);chunks.push(Buffer.from(chunk));}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new GameError('AI returned an invalid response.',502);}}
  async function call(r,messages,format,userId,authorize=()=>{}){
@@ -55,14 +57,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  function context(r,p){return worldContext(r,p,p?nearbyCountries(r.world,p.country):[]);}
  async function adjudicate(r,userId,authorize){
   if(r.mode==='demo')return {events:[{title:'A month of uncertainty',body:'Demo rules resolved this turn without an AI model. Industry, public investment and military orders use the same deterministic rules as Ollama mode.'}],policies:r.players.flatMap(p=>p.orders.flatMap((o,i)=>o.type==='policy'?[{playerId:p.id,orderIndex:i,outcome:`${r.world.countries.find(c=>c.id===p.country).name} begins preparations: ${o.text}. Demo mode grants no policy bonuses.`,treasury:0,economy:0,military:0,stability:0}]:[])),npcOrders:[]};
-  const system=systemPrompt(r,'turn');
-  const input={...context(r),diplomacy:turnDiplomacy(r),months:r.months,players:r.players.map(p=>({playerId:p.id,country:p.country,orders:p.orders}))};
-  let rejection='';
-  for(let attempt=0;attempt<2;attempt++){
-   const raw=await call(r,[{role:'system',content:system},{role:'user',content:JSON.stringify({...input,...(rejection?{repairInstruction:'The previous proposal was rejected: '+rejection+'. Return a complete corrected response using existing IDs and valid map changes.'}:{})})}],r.world.mapMode==='wild'?directorTurnSchema:turnSchema,userId,authorize);
-   try{return validateAI(r,JSON.parse(raw));}
-   catch(e){if(attempt===1)throw e instanceof SyntaxError?new GameError('Ollama returned malformed JSON twice. No game changes were applied.',502):e;rejection=e instanceof SyntaxError?'Malformed JSON':e.message;}
-  }
+  return adjudicateBoundedTurn(r,{contextLength:config.aiContext,outputTokens:config.aiTurnOutput,request:(messages,format)=>call(r,messages,format,userId,authorize)});
  }
  async function body(req,max=32768){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;check(size<=max,'Request is too large.',413);chunks.push(chunk);}try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');check(value&&typeof value==='object'&&!Array.isArray(value),'JSON body must be an object.');return value;}catch(e){if(e.status)throw e;throw new GameError('Invalid JSON.');}}
  const reply=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
@@ -154,7 +149,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
     let id;do{id=randomBytes(4).toString('hex').slice(0,6).toUpperCase();}while(rooms.has(id));
     check(b.mapMode===undefined||['wild','strategy'].includes(b.mapMode),'Choose wild or strategy map mode.');
     const room={id,name:text(b.name,60,'Campaign name'),hostId:player.id,round:1,months:1,phase:'planning',error:null,endpoint:config.endpoints[0],model:config.defaultModel,mode:config.defaultMode,prompts:{...promptDefaults},players:[player],world:scenario(),history:[],messages:[]};
-    room.world.mapMode=b.mapMode||'wild';save(room);identity.audit(account.user.id,'campaign_created',id);reply(res,201,{room:view(room,player)});return;
+    room.world.mapMode=b.mapMode||'wild';checkWorldCapacity(room);save(room);identity.audit(account.user.id,'campaign_created',id);reply(res,201,{room:view(room,player)});return;
    }
    check(parts[1]==='rooms'&&/^[A-Z0-9]{6}$/.test(parts[2]||'')&&parts.length<=4,'Not found.',404);
    let r=rooms.get(parts[2]);check(r,'Campaign not found.',404);
@@ -182,7 +177,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    else if(action==='ready'){planning(r);check(!timerExpired(r,clock()),'The turn deadline has passed. Saved orders are locked.',409);check(typeof b.ready==='boolean','Invalid readiness.');validateOrders(r,p,p.orders);p.ready=b.ready;save(r);}
    else if(action==='scenario'){
     host(r,p);planning(r);check(r.round===1&&r.history.length===0&&r.players.every(p=>!p.ready),'Edit the starting scenario only before the first turn, with everyone unready.',409);
-    const world=validateScenario(b.world,r.players);r.epoch=(r.epoch||0)+1;r.revision=(r.revision||0)+1;r.world=world;r.messages=[];r.advisorMessages=[];r.checkpoints=[];for(const player of r.players){player.orders=[];player.ready=false;}restartTimer(r,clock());save(r);identity.audit(account.user.id,'scenario_edited',r.id);
+    const world=validateScenario(b.world,r.players);checkWorldCapacity({...r,world});r.epoch=(r.epoch||0)+1;r.revision=(r.revision||0)+1;r.world=world;r.messages=[];r.advisorMessages=[];r.checkpoints=[];for(const player of r.players){player.orders=[];player.ready=false;}restartTimer(r,clock());save(r);identity.audit(account.user.id,'scenario_edited',r.id);
    }
    else if(action==='rewind'){
     host(r,p);planning(r);const point=(r.checkpoints||[]).find(c=>c.round===b.round);check(point,'Choose an available checkpoint.');
@@ -200,6 +195,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
     const nextPremise=b.premise!==undefined?text(b.premise,10000,'Simulation rules'):r.world.premise;
     const nextPrompts=b.prompts!==undefined?validatePrompts(b.prompts):editablePrompts(r);
     const nextMapMode=b.mapMode??r.world.mapMode,nextProtect=b.protectPlayers??r.world.protectPlayers;check(['wild','strategy'].includes(nextMapMode)&&typeof nextProtect==='boolean','Invalid map director settings.');
+    checkWorldCapacity({...r,mode:b.mode,prompts:nextPrompts,world:{...r.world,premise:nextPremise,mapMode:nextMapMode,protectPlayers:nextProtect}});
     r.world.premise=nextPremise;r.prompts=nextPrompts;r.world.mapMode=nextMapMode;r.world.protectPlayers=nextProtect;
     r.revision=(r.revision||0)+1;r.endpoint=ep;r.model=b.model.trim();r.months=b.months;r.mode=b.mode;save(r);
    }

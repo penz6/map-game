@@ -1,15 +1,17 @@
-# RX 6750 XT profile and context compaction
+# 20K model context, compaction and RX 6750 XT profile
 
-Version 3 raises the earlier 12K context to 20K for its larger world and schema. This version supplies a conservative starting profile for a 12 GB Radeon RX 6750 XT using Ollama's Q4 `qwen2.5:7b`. It was not benchmarked on this GPU and does not reserve an exact amount of VRAM. Your existing Ollama endpoint stays in use; the game container needs no GPU devices. The Docker image is our original Node application built on the official Node.js base, not another game's image.
+Version 3.5 enforces a **20,000-token total context ceiling**. The configured window includes input, response reserve and framing headroom. No game request raises it to 24K/32K. An explicit AI_CONTEXT_LENGTH above 20000 is rejected at startup; change any older .env value of 20480 to 20000.
 
-## Game configuration
+This is an application request/budget limit, not a measured VRAM allocation. The separate Ollama process, other clients and GPU backend retain their own settings. No physical RX 6750 XT or real-model quality/latency benchmark was available.
 
-Set these in your existing Compose `.env` before recreating the app. Old explicit values remain in effect until changed; do not replace your whole `.env` or regenerate the MFA secret.
+## Starting configuration
+
+For the 12 GB RX 6750 XT, keep qwen2.5:7b Q4 as the starting model, one generation and batch 128:
 
 ```dotenv
 OLLAMA_MODEL=qwen2.5:7b
 AI_MAX_CONCURRENCY=1
-AI_CONTEXT_LENGTH=20480
+AI_CONTEXT_LENGTH=20000
 AI_BATCH_SIZE=128
 AI_TURN_OUTPUT_TOKENS=3072
 AI_CHAT_OUTPUT_TOKENS=768
@@ -17,82 +19,62 @@ AI_KEEP_ALIVE_SECONDS=300
 AI_THINK=default
 ```
 
-Then run `docker compose up -d --build`. Existing campaigns keep their model selection; change that in Host settings if necessary. All campaigns use the server's context/output/batch settings. Host settings shows the active context size and compaction status.
+AI_CONTEXT_LENGTH accepts 4096–20000, but lower values may not fit essential state. Output reserves must leave more than 1,024 tokens of input at startup; every request then passes its stricter actual budget check. A smaller output reserve can cause incomplete answers; done_reason=length is always rejected.
 
-A 20K window accommodates the expanded authoritative province/army state, one generation avoids parallel cache duplication, and a batch size of 128 reduces prompt-processing memory at a possible throughput cost. Output reserves limit long generations. The game asks Ollama to keep the model loaded for five minutes after use; this is a residency request, not a VRAM cap or guaranteed immediate release. Reducing batch/context can slow or limit workloads. Qwen2.5 7B's roughly 4.7 GB download is not its total runtime footprint.
-
-| Variable | Default | Allowed |
-| --- | --- | --- |
-| `AI_MAX_CONCURRENCY` | 1 | 1–2; use 1 on this GPU |
-| `AI_CONTEXT_LENGTH` | 20480 | 4096–32768; smaller windows may not fit the essential game data |
-| `AI_BATCH_SIZE` | 128 | 32–512 |
-| `AI_TURN_OUTPUT_TOKENS` | 3072 | 512–8192 |
-| `AI_CHAT_OUTPUT_TOKENS` | 768 | 128–2048 |
-| `AI_KEEP_ALIVE_SECONDS` | 300 | 0–3600 |
-
-Output reserves must leave more than 1,024 tokens for input at startup. Every individual request must also pass the stricter actual input-budget check below. More players, long policies or custom system prompts can require a larger window or shorter text. A lower output limit can cause a turn to fail validation; it does not silently apply partial results.
-
-## Settings for your separate Ollama service
-
-The game cannot change your host Ollama process's global memory configuration. `.env.ollama.example` documents these settings for the machine running Ollama:
+Configure your **separate Ollama service** as well, then restart that service:
 
 ```dotenv
 OLLAMA_NUM_PARALLEL=1
 OLLAMA_MAX_LOADED_MODELS=1
-OLLAMA_CONTEXT_LENGTH=20480
+OLLAMA_CONTEXT_LENGTH=20000
 ```
 
-Apply them to Ollama's service/user environment, then restart Ollama using your existing operating-system/service setup. Merely putting these variables in the game container does not configure a separate host Ollama. For a manually launched Linux/macOS server, after stopping the existing Ollama process, the equivalent command is:
+Putting those variables only in the game container does not configure host Ollama. Every game request explicitly sends num_ctx no higher than 20000, num_batch 128 by default, and its output reserve. Keep your already-working AMD backend. Check ollama ps, service logs and a GPU monitor during real play; model weights, KV cache, display use and backend buffers all consume memory. The game's container needs no GPU device.
 
-```sh
-OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_CONTEXT_LENGTH=20480 ollama serve
-```
+Flash attention and q8_0 KV cache remain optional backend-specific settings in .env.ollama.example; they are not forced by the game. Sources: [GPU support](https://docs.ollama.com/gpu), [context](https://docs.ollama.com/context-length), [FAQ/KV cache](https://docs.ollama.com/faq), [Qwen2.5 7B](https://ollama.com/library/qwen2.5:7b).
 
-Keep using your already-working GPU backend. Check `ollama ps`, Ollama logs and your GPU memory monitor during a turn and a diplomatic conversation. Display use, other applications, model variants and backend buffers affect available memory. Backend acceleration for the RX 6750 XT was not tested here.
+## Compaction and strict request budgeting
 
-Flash attention plus `OLLAMA_KV_CACHE_TYPE=q8_0` can reduce cache memory on compatible Ollama backends. They are optional commented settings in `.env.ollama.example`; support varies, particularly across AMD backends. Enable only after confirming your installed backend supports them. The default profile does not force them or alter model weight quantization.
+1. Encode world data in tables. Keep stable nation/province IDs, exact ownership and required resources/relationships. Omit polygon coordinates and visual labels. Wild Map has a smaller snapshot than Strategy.
+2. Compact optional public history into selected excerpts, not a fabricated canonical memory. Private chat/advisor compaction uses only the already participant-filtered exchange.
+3. Shorten/drop optional older history and negotiation excerpts as needed. Preserve the current request and the original orders on disk. Public/private histories are not replaced by summaries.
+4. Reserve 3,072 output tokens for turns (768 for chat by default) and 512 for template/framing headroom. Include schema size. Conservatively bound text using UTF-8 bytes, not an English characters-per-token assumption. This is not an exact tokenizer for every model/template.
+5. Small turns use the existing one-call full resolution. If that cannot fit, automatically use staged planning below. No model request bypasses the 20K check.
 
-Sources: [Ollama GPU compatibility](https://docs.ollama.com/gpu), [context length](https://docs.ollama.com/context-length), [FAQ and KV cache settings](https://docs.ollama.com/faq), [Qwen2.5 7B](https://ollama.com/library/qwen2.5:7b).
+Compaction is lossy. Incidental events, old promises or nuance may be omitted. Current state remains authoritative, but model summaries and optional memory are not a guarantee of lifelong diplomatic recall. Original campaign data remains saved, subject to the existing 1,000-message chat/advisor retention caps.
 
-## What compaction does
+## Oversized turns use sequential bounded passes
 
-Compaction runs locally before each AI request. It uses deterministic extraction, not an extra AI summary call. It adds no model generations or chance of a summarizer inventing facts.
+- Read the full submitted policy texts in batches of up to six, sized by the actual budget. Each batch sees all ownership/identity information and the issuing governments' exact resources, units, routes and other orders. It cannot issue commands for another human government.
+- Policies retain their original playerId/orderIndex. Results are validated together with earlier policy actions, including budget and repeated-unit constraints.
+- If an individual text plus necessary state still cannot fit (for example, heavily escaped text), first send its complete text in a small intent-compression request. The subsequent policy pass uses the explicitly labeled summary. The original is never silently cut or replaced in the save.
+- Supply a bounded intent summary for **every** policy to one final world-resolution pass. These summaries are explicitly lossy (up to 80 UTF-8 bytes per intent); that pass does not re-adjudicate policies. It chooses the final map changes/NPC diplomatic responses or Strategy NPC orders.
+- Compact the final Strategy graph losslessly into undirected row-index pairs, and omit display-only army names while retaining unit IDs/owners/positions/strength. Output actions still require stable IDs. Full original state stays in the game.
+- Validate the entire combined result and future world's capacity, then commit once. No intermediate policy result changes the shared map, treasury, date or order list. Any failed phase leaves the turn unchanged.
 
-1. Send exact live state as tables. Wild Map uses a smaller map-focused snapshot: all nation IDs/names/colors/capitals, every province ID/name/owner, human seats, date and current orders. It omits army/economy planning and adjacency. Strategy retains gameplay stats, units and adjacency. Neither sends polygon/label coordinates.
-2. Keep the system prompt, world premise, current message/question and every submitted current order unchanged. Include the JSON schema in budgeting for turn requests.
-3. Start with up to three recent public turns. Build hierarchical highlights from the older archive, selecting short excerpts and merging older ranges into bounded blocks. Favor policy and conflict-related developments. These are partial highlights, not complete diplomatic memory.
-4. For NPC diplomacy, work only with the account/recipient-filtered conversation. Start with the latest six messages verbatim and selected older excerpts. Never read other private messages into the request. Private excerpts are not added to public campaign memory.
-5. Reserve the output budget plus 512 tokens of template/framing headroom. Bound the text conservatively using UTF-8 byte length, rather than assuming a fixed English characters-per-token ratio. This is a conservative bound for byte-fallback/BPE text such as Qwen's, not an exact tokenizer or a guarantee for arbitrary custom model templates.
-6. If necessary, shorten recent historical bodies, merge/drop older highlight blocks and compact/drop prior conversation. The current world, submitted orders and current message are never shortened. If those essential parts still do not fit, reject before contacting Ollama with an actionable error.
+The one world director remains responsible for the final map; batching does not create independent AI nation agents. Large turns take more sequential model calls. Each phase gets at most one correction for invalid JSON/proposals. Network/timeouts/output-limit errors are not automatically replayed. Model timeouts apply per call; a large job can take substantially longer than one timeout interval overall.
 
-Compaction is lossy. Earlier nuance, promises or incidental events may be absent from a request, especially under tight budgets. The prompt explicitly labels highlights as incomplete and the current world as authoritative. It does not create binding treaty mechanics. Full public history, saved orders and private messages are left untouched by compaction; existing chat retention still caps a campaign at its latest 1,000 messages. There is no vector database or retrieval search, and highlights are recomputed from saved data for each request rather than replacing the archive with an AI-generated summary.
+## Reproducible 20K stress measurements
 
-A successful request can use fewer actual tokens than the conservative budget allows. This intentionally favors predictable fitting over maximum context utilization. Models with unusual templates/tokenizers may need more headroom or a different context setting.
+Run node scripts/context-report.mjs. It uses controlled valid responses, not a live model. Every number below includes input byte-bound, output reserve and framing headroom. Calls can vary with real responses, requested extra actions, custom prompts and history.
 
-## Failures and executable tools
+| Starting map workload | Wild Map calls / peak bound | Strategy calls / peak bound |
+| --- | ---: | ---: |
+| 2 players, no policies | 1 / 16,009 | 1 / 17,494 |
+| 2 players, one 100-character policy each | 1 / 16,263 | 1 / 17,748 |
+| 12 players, one 300-character policy each | 3 / 16,741 | 3 / 16,846 |
+| 12 players, three 300-character policies each | 7 / 18,949 | 7 / 19,054 |
+| 12 players, three 2,000-character ASCII policies each | 13 / 18,949 | 13 / 19,242 |
+| 12 players, three 2,000-character multibyte policies each | 37 / 18,949 | 37 / 19,116 |
 
-The model has no filesystem, shell, network tools or permission to change accounts. Turn requests use Ollama's structured JSON response format, not its function/tool-calling protocol. The engine validates proposed actions and independently resolves them. Diplomatic/advisor replies are text only. A model-provided `tool_calls` field is never dispatched to executable code; absent text fails the usual response check.
+All remain below 20,000 without dropping a player's policy. The multibyte fixture uses 2,000 three-byte characters per policy. These are app budget measurements, not actual Qwen token counts, real-model agreement quality, throughput or exact VRAM totals.
 
-If Ollama reports `done_reason: length`, the server rejects the answer even if its partial text appears valid. Invalid schema, excessive effects, timeouts and oversized essential context likewise leave world/resources/orders unchanged and permit host retry. A malformed JSON or invalid proposal gets at most one correction generation, with the validation error. Network errors, timeouts and output-limit failures are not automatically retried. Two rejected proposals preserve the turn; there is no scripted fallback. Generation jobs return HTTP 202 promptly and the browser polls account-private /api/jobs/:id endpoints. Idempotency-Key replay returns the original job while it remains cached and rejects key reuse with a different body. Jobs are bounded, volatile across restart and retained up to one hour subject to cache capacity; refresh campaign state before retrying an expired job. A navigation change cannot replace the current campaign UI with an old job result. Generation requests use a bounded in-memory queue: up to 32 waiting, up to four outstanding per account, and a ten-minute waiting deadline. Requests start in arrival order among eligible accounts; one account cannot run parallel generations even when server concurrency is two. The default remains one active generation for the RX 6750 XT. Model execution has a separate timeout starting at dispatch. Overload, expired waits, stale worlds or revoked authorization still return actionable errors. A failed generation releases the slot. Restart clears waiting requests; it does not automatically replay chats or turns. Wild Map normally needs just one director request per turn; no per-nation planning or advisor request is required.
+## Admission and failures
 
-## Diplomacy and turn context
+Scenario imports, prompt/premise configuration and AI-proposed successor worlds are checked against the minimum world-resolution budget. An impossible setup is rejected before saving it; an oversized successor proposal can receive the bounded correction attempt. Extremely large custom maps, many long names, oversized prompts or large output reserves can still be incompatible with 20K. The error asks for a smaller scenario/prompt/reserve rather than raising context or silently deleting ownership data.
 
-The turn director now receives recent completed NPC negotiations from current human seats: at most 48 messages across the current and two preceding rounds, with 600-character excerpts. Human DMs, advisor exchanges, former-seat conversations and account identifiers are excluded. Optional diplomacy excerpts shrink under context pressure without changing current orders or the ownership map. Chat/advisor requests retain their existing participant filters.
+AI jobs return HTTP 202 promptly and are polled through account-private endpoints. Default generation concurrency stays one; at most 32 wait, with four outstanding per account and a ten-minute queue deadline. Staged calls share that job's slot through final validation/commit. Completed jobs are cached up to one hour subject to bounded eviction; restart/expiry requires refreshing the campaign before retrying. Idempotency-Key replay is supported while cached. There is no arbitrary executable tool dispatch: model JSON is data validated by the engine.
 
-Negotiations may influence consequences but do not force compliance or execute immediate changes. Transcript text is not added to public chat/history. The director is instructed to describe public consequences without quoting private exchanges; generated prose is not a cryptographic secrecy boundary, and public consequences may reveal an arrangement. The Ollama operator sees supplied context. Finish ongoing conversations before advancing: an unfinished reply is rejected if resolution has begun.
+## Diplomacy
 
-## Measured context sizing (3.4)
-
-Run `node scripts/context-report.mjs` to reproduce these starting-world requests. These are **the application's conservative UTF-8-byte token bounds**, including schema, output reserve of 3,072 and 512 tokens of framing headroom. They are not actual Qwen tokenizer counts or GPU measurements. Optional history/diplomacy may be compacted or dropped to fit; current state/orders are not shortened.
-
-| Starting-world workload | Wild Map required bound | Strategy required bound | Suggested setting |
-| --- | ---: | ---: | --- |
-| 2 players, no policies | 16,009 | 18,382 | 20,480 |
-| 2 players, one 100-character policy each | 16,263 | 18,636 | 20,480 |
-| 12 players, one 300-character policy each | 20,425 | 22,808 | 24,576 for both modes |
-| 12 players, three 300-character policies each | 28,297 | 30,680 | 32,768 |
-| 12 players, three 2,000-character policies each | Above 32,768 | Above 32,768 | Shorten policies; current maximum cannot fit |
-
-20,480 remains the practical starting default on the RX 6750 XT. 16,384 barely fits the two-player Wild examples with very little memory headroom, and does not fit the Strategy examples. A larger context consumes more KV-cache memory; do not assume a 32K workload fits your available VRAM without checking `ollama ps` and your memory monitor. Starting-world measurements do not cover grown 64-nation worlds, arbitrary custom maps or long custom prompts.
-
-Wild Map now includes compact political identities, treasuries and existing treaties so its single director can make valid diplomatic responses. Its optional agreements field can consent to treaty/unification orders, or break an existing treaty, using normal budget/ownership validation. It still does not send full army/economy planning tables for every nation. Strategy map changes must come from validated orders and combat, not director patches.
+The final director receives recent completed NPC negotiations from current human seats: up to 48 messages across the current/two preceding rounds, with 600-character excerpts, compacted further as needed. Human DMs, advisor exchanges, former-seat conversations and account identifiers are excluded. Private narration is instructed not to quote negotiations; public consequences may reveal an arrangement. The server/Ollama operator is trusted. Finish conversations before advancing; unfinished replies are rejected once resolution has begun.

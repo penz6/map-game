@@ -1,4 +1,4 @@
-# Historia Local 3.4 — multiplayer AI map sandbox
+# Historia Local 3.5 — multiplayer AI map sandbox
 
 An original self-hosted alternate-history game using your Ollama endpoint. It is not built on another game's image or engine. Runtime dependencies are Node.js and its bundled SQLite; there is no npm installation/build step or CDN. The Docker image uses the official Node base behind your Pangolin/Traefik HTTPS route.
 
@@ -86,9 +86,9 @@ AI requests return background jobs immediately and the browser polls for complet
 
 ## Models, prompts and memory
 
-[AI.md](AI.md) documents the 12 GB RX 6750 XT starting profile, native Ollama settings and compaction. Version 3 uses a **20,480** context default because the larger world/action schema no longer fits the earlier conservative 12K/16K budgets. Keep one generation, batch 128, and begin with `qwen2.5:7b`. Actual VRAM usage and model quality have not been benchmarked on your card. Existing explicit `.env` values override new defaults.
+[AI.md](AI.md) documents the RX 6750 XT starting profile and the **20,000 total context ceiling**, including output/framing reserves. Keep one generation, batch 128, and begin with qwen2.5:7b Q4. Large turns automatically use sequential policy batches plus one final world pass; they never request a larger context. Full orders stay saved, while final policy intents are explicitly lossy summaries. A failed phase commits nothing. Update any older .env context value above 20000 before starting. Actual model quality and VRAM usage remain unbenchmarked on your card.
 
-Hosts can edit turn/diplomacy/advisor prompts per campaign. The fixed application contract and engine validation remain in force. The world is encoded as tables; optional older history and private dialogue compact into partial highlights. Essential state, submitted orders and the current message are not shortened. If they cannot fit, the request fails before reaching Ollama. See [PROMPTS.md](PROMPTS.md).
+Hosts can edit turn/diplomacy/advisor prompts per campaign. The fixed application contract and engine validation remain in force. The world is encoded as tables; optional older history and private dialogue compact into partial highlights. Essential state and the current message are budgeted before each request. Original orders stay saved and are read in full during bounded policy or explicit source-compression passes; final world planning uses labeled lossy intent summaries. Impossible scenarios/prompts are rejected instead of increasing the 20K ceiling. See [PROMPTS.md](PROMPTS.md).
 
 ## Recovery and checks
 

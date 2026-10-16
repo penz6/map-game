@@ -6,13 +6,13 @@ import { turnSchema } from '../engine.mjs';
 import { systemPrompt } from '../prompts.mjs';
 const makeRoom = () => ({ world: {...scenario(),mapMode:'strategy'}, round: 1, history: [] });
 function pack(room, input = {}, settings = {}) {
-  return compactRequest({ room, messages: [{ role: 'system', content: systemPrompt(room, settings.chat ? 'diplomacy' : 'turn',room.world.countries[0]) }, { role: 'user', content: JSON.stringify({ ...worldContext(room), ...input }) }], format: settings.chat ? undefined : turnSchema, contextLength: 20480, outputTokens: settings.chat ? 768 : 3072, ...settings });
+  return compactRequest({ room, messages: [{ role: 'system', content: systemPrompt(room, settings.chat ? 'diplomacy' : 'turn',room.world.countries[0]) }, { role: 'user', content: JSON.stringify({ ...worldContext(room), ...input }) }], format: settings.chat ? undefined : turnSchema, contextLength: 20000, outputTokens: settings.chat ? 768 : 3072, ...settings });
 }
 const archived = i => ({ round: i + 1, date: '1936-01-01', events: [{ title: `Round ${i + 1}: diplomatic uncertainty`, body: 'Governments discuss their national priorities. '.repeat(50) }, { title: `Round ${i + 1}: policy outcome`, body: 'Research improved military capabilities. '.repeat(50) }], orders: [{ name: 'Former player', country: 'FR', orders: [{ type: 'policy', text: 'OLD ORDER TEXT' }] }] });
 
 test('12GB profile fits essential starting world, schema, prompts and output reserve', () => {
   const room = makeRoom(), result = pack(room, { months: 1, players: [{ playerId: 'human', country: 'FR', orders: [{ type: 'policy', text: 'Fund industrial research.' }] }] });
-  assert(result.inputBound <= result.inputBudget);assert.equal(result.inputBudget, 20480 - 3072 - 512);
+  assert(result.inputBound <= result.inputBudget);assert.equal(result.inputBudget, 20000 - 3072 - 512);
   assert.equal(requestTokenBound(result.messages, turnSchema), result.inputBound);
   const ctx = JSON.parse(result.messages[1].content);
   assert.equal(ctx.countries.length, 28);assert.equal(ctx.territories.length, 84);
@@ -51,8 +51,8 @@ test('oversized essential input and multi-byte content fail explicitly without t
 
 test('context profile validates combined output reserve and memory controls',async()=>{
  const {securityConfig}=await import('../security.mjs');
- const profile=securityConfig({});assert.equal(profile.aiConcurrency,1);assert.equal(profile.aiContext,20480);assert.equal(profile.aiBatch,128);assert.equal(profile.aiTurnOutput,3072);assert.equal(profile.aiChatOutput,768);assert.equal(profile.aiKeepAlive,300);
- for(const bad of [{AI_BATCH_SIZE:'0'},{AI_KEEP_ALIVE_SECONDS:'-1'},{AI_TURN_OUTPUT_TOKENS:'99999'},{AI_CHAT_OUTPUT_TOKENS:'0'},{AI_CONTEXT_LENGTH:'4096',AI_TURN_OUTPUT_TOKENS:'4096'}])assert.throws(()=>securityConfig(bad));
+ const profile=securityConfig({});assert.equal(profile.aiConcurrency,1);assert.equal(profile.aiContext,20000);assert.equal(profile.aiBatch,128);assert.equal(profile.aiTurnOutput,3072);assert.equal(profile.aiChatOutput,768);assert.equal(profile.aiKeepAlive,300);
+ for(const bad of [{AI_BATCH_SIZE:'0'},{AI_CONTEXT_LENGTH:'20001'},{AI_KEEP_ALIVE_SECONDS:'-1'},{AI_TURN_OUTPUT_TOKENS:'99999'},{AI_CHAT_OUTPUT_TOKENS:'0'},{AI_CONTEXT_LENGTH:'4096',AI_TURN_OUTPUT_TOKENS:'4096'}])assert.throws(()=>securityConfig(bad));
 });
 
 test('turn diplomacy excludes former seats, human DMs, future and old rounds and compacts without changing orders',async()=>{

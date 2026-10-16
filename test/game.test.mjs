@@ -193,17 +193,15 @@ test('VRAM profile reaches Ollama and output-limit failures preserve the committ
  for(const p of [host,guest])await req(route('ready'),{ready:true},p.token);
  const before=(await req(route(),null,host.token)).body;
  const result=await req(route('advance'),{},host.token);assert.equal(result.status,502);assert.match(result.body.error,/output limit/);
- assert.equal(payload.options.num_ctx,20480);assert.equal(payload.options.num_batch,128);assert.equal(payload.options.num_predict,3072);assert.equal(payload.keep_alive,300);
+ assert.equal(payload.options.num_ctx,20000);assert.equal(payload.options.num_batch,128);assert.equal(payload.options.num_predict,3072);assert.equal(payload.keep_alive,300);
  const after=(await req(route(),null,host.token)).body;assert.deepEqual(after.world,before.world);assert.equal(after.round,1);assert(after.players.every(p=>p.ready));
  // Failure releases the generation slot for the next request.
  assert.equal((await req(route('advisor'),{text:'What now?'},host.token)).status,502);
 });
 
-test('oversized required policy fails locally before Ollama with no partial world commit',async t=>{
- let calls=0;const f=await fixture(t,async()=>{calls++;return Response.json({message:{content:JSON.stringify(ai)}});});
- const {req,host,guest,route}=f;
- await req(route('config'),{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1,premise:'Oversized exact premise. '.repeat(300)},host.token);
- for(const p of [host,guest])await req(route('ready'),{ready:true},p.token);
- const before=(await req(route(),null,host.token)).body;const result=await req(route('advance'),{},host.token);assert.equal(result.status,413);assert.match(result.body.error,/Essential AI input/);assert.equal(calls,0);
- const after=(await req(route(),null,host.token)).body;assert.deepEqual(after.world,before.world);assert.equal(after.round,1);assert.equal(after.phase,'planning');
+test('oversized premise is rejected before saving configuration or calling Ollama',async t=>{
+ let calls=0;const f=await fixture(t,async()=>{calls++;return Response.json({message:{content:JSON.stringify(ai)}});});const {req,host,route}=f;
+ const before=(await req(route(),null,host.token)).body;
+ const result=await req(route('config'),{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1,premise:'Oversized exact premise. '.repeat(300)},host.token);
+ assert.equal(result.status,413);assert.match(result.body.error,/20,000/);assert.equal(calls,0);assert.deepEqual((await req(route(),null,host.token)).body.world,before.world);
 });
