@@ -1,0 +1,8 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createAIJobs} from '../ai-jobs.mjs';
+const tick=()=>new Promise(r=>setImmediate(r));
+test('job admission is bounded; completed jobs expire and cannot leak to another account',async()=>{
+ let time=0,release;const gate=new Promise(r=>release=r),jobs=createAIJobs({clock:()=>time,ttl:100,maxActive:1,maxJobs:2});const request={owner:'owner',key:'requestkey',route:'/chat',body:{text:'one'},roomId:'room',seat:'seat',work:async()=>{await gate;return {answer:'private'};}};const job=jobs.start(request);assert.equal(job.state,'pending');assert.throws(()=>jobs.get('other',job.id),e=>e.status===410);assert.throws(()=>jobs.start({...request,key:'another'}),e=>e.status===429);assert.equal(jobs.lookup('owner','requestkey','/chat',request.body).id,job.id);assert.throws(()=>jobs.lookup('owner','requestkey','/chat',{text:'changed'}),e=>e.status===409);release();await tick();assert.equal(job.state,'done');assert.equal(job.result.answer,'private');time=101;assert.throws(()=>jobs.get('owner',job.id),e=>e.status===410);assert.equal(jobs.lookup('owner','requestkey','/chat',request.body),undefined);
+});
+test('failed jobs retain actionable errors and release admission capacity',async()=>{
+ const jobs=createAIJobs({maxActive:1}),request={owner:'owner',key:'failedrequest',route:'/chat',body:{},roomId:'room',seat:'seat',work:async()=>{throw Object.assign(new Error('World changed'),{status:409});}};const job=jobs.start(request);await tick();assert.equal(job.state,'failed');assert.deepEqual(job.error,{status:409,message:'World changed'});const next=jobs.start({...request,key:'nextrequest',work:async()=>({answer:'okay'})});await tick();assert.equal(next.state,'done');
+});

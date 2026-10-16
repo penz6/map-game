@@ -1,8 +1,10 @@
-# Historia Local 3.3 — multiplayer AI map sandbox
+# Historia Local 3.4 — multiplayer AI map sandbox
 
 An original self-hosted alternate-history game using your Ollama endpoint. It is not built on another game's image or engine. Runtime dependencies are Node.js and its bundled SQLite; there is no npm installation/build step or CDN. The Docker image uses the official Node base behind your Pangolin/Traefik HTTPS route.
 
 **Wild Map is the default:** one AI world director turns player plans into breakaway republics, improbable unions, collapses and border transfers. Each successful AI turn must actually change province ownership; a funny headline alone is rejected. The shared map updates its colors and highlights changed provinces for every player. See [MAP-DIRECTOR.md](MAP-DIRECTOR.md). The starting map has **28 nations and 84 schematic provinces**; the optional Strategy mode retains armies, budgets, treaties and bounded NPC orders. [PARITY.md](PARITY.md) records the current Pax Historia research and remaining gaps. This is not full Pax Historia parity, and the original sketch is not an accurate historical province dataset.
+
+See [FEATURES.md](FEATURES.md) for the current feature matrix and gaps, [AUDIT.md](AUDIT.md) for audit closures, and [AI.md](AI.md) for measured context requirements.
 
 ## Docker
 
@@ -80,7 +82,7 @@ Before the first completed turn, with all players unready, **Host settings → S
 
 **Host settings → Timeline checkpoints** lists up to 20 pre-turn snapshots. Rewind restores world state and removes later events, chat, advisor exchanges and current orders. It does not alter accounts or invitations. Seats for successor nations absent at the chosen checkpoint must be removed first. In-flight replies from the discarded branch are rejected. This is whole-turn rewind, not per-event intervention.
 
-AI generation requests queue instead of failing when another player is using Ollama. The default remains one active generation, with up to 32 waiting requests and four outstanding per account. Waits expire after ten minutes; model execution has its separate timeout. The queue is in memory and requests must be resent after restart. Stale or unauthorized queued requests are rejected before generation.
+AI requests return background jobs immediately and the browser polls for completion, so Pangolin/Traefik connections stay short. Queued follow-ups use the latest completed conversation. AI generation requests queue instead of failing when another player is using Ollama. The default remains one active generation, with up to 32 waiting requests and four outstanding per account. Waits expire after ten minutes; model execution has its separate timeout. The queue/job cache is in memory; after restart or expired results, refresh the campaign before retrying. Idempotency keys prevent duplicate execution while a job is cached. Stale or unauthorized queued requests are rejected before generation.
 
 ## Models, prompts and memory
 

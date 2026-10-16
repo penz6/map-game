@@ -17,7 +17,7 @@ The game runs as one Node container with persistent accounts/campaigns and a sep
 
 The backend accepts HTTP connections from any source address. It neither requires nor uses `X-Forwarded-For`, `X-Forwarded-Proto` or a proxy-IP allowlist. `PUBLIC_ORIGIN` still controls exact browser Origin/Host validation and Secure cookies. Pangolin is responsible for public TLS and network reachability, as specified for this deployment.
 
-Allow enough upstream time for AI calls: the app permits ten minutes waiting in its queue, followed by generation, and a turn may need one correction attempt. With default 180-second generations, two attempts can each wait and run; use an upstream response timeout of at least 30 minutes if your proxy imposes one. Requests currently hold their HTTP connection open rather than returning asynchronous job IDs.
+AI actions return a background job immediately; the browser polls short authenticated GET requests until completion. The proxy does not need to keep one connection open for the queue/generation duration. Queue waits and model execution retain separate timeouts. Jobs support Idempotency-Key replay while cached; restart/expiry requires refreshing the campaign before retrying.
 
 Application rate limits do not group players by the proxy address: 120 authenticated mutations and 300 authenticated reads per account per minute; ten login attempts per username per 15 minutes (successful authentication clears that username's counter); ten registration attempts per valid invitation per 15 minutes. There is a shared short burst guard of 200 POSTs, refilling at 50 per second, plus a two-password-hash concurrency limit and the existing bounded AI queue. Forwarded-IP changes cannot reset these limits.
 

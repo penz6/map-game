@@ -54,3 +54,12 @@ Each AI request is budgeted before sending. Essential current world data, submit
 NPC diplomacy and queue boundary (3.2): recent completed player–NPC exchanges from current seats are supplied as bounded excerpts to the shared turn director. Human DMs, advisor text, former-seat messages and account IDs are excluded. They are not exposed through other players' message APIs. The model is instructed not to quote private negotiations, but public consequences and generated prose may reveal arrangements; do not treat model narration as a secrecy guarantee.
 
 Generation admission is bounded to 32 waiting requests, four outstanding per account, a ten-minute wait deadline and the configured one/two active generations, at most one per account. Execution timeout begins after admission. Session/seat authorization and world revision/phase are rechecked before queued generation, and existing post-generation checks still apply. Queue state is volatile across restarts. This protects finite resources while letting ordinary concurrent play wait rather than fail.
+
+
+## Audit hardening (3.4)
+
+Request bodies are fully parsed before mutable campaign state and final authorization are acquired. Password-change/reauth flows also recheck the initiating session after asynchronous hashing. Campaign saves reject stale object replacement unless the current predecessor is supplied explicitly. Queued jobs revalidate sessions, seats, phase and revision; queued NPC replies also recheck that the recipient remains unclaimed. The generation slot remains held through result validation and state commit, so follow-up context sees preceding replies.
+
+AI jobs return 202 with account-private opaque IDs; other accounts cannot retrieve them. The browser polls short authenticated requests. Matching idempotency keys replay the same cached job; mismatched bodies are rejected. Pending jobs are capped at four per account and the generation-plus-waiting capacity globally; completed jobs have one-hour retention subject to bounded cache eviction. Caches are in memory and no automatic replay occurs after restart. Refresh the authoritative campaign before retrying an unavailable job.
+
+Strategy rejects director map patches; Wild Map diplomatic agreements are restricted to affordable NPC treaty/unification/break responses. Human actions require human orders. A dry-run of the full resolution catches post-order map conflicts before the bounded AI correction attempt. Guest rendering reconciles removed nation/province selections on updated world state.

@@ -31,3 +31,6 @@ The server allocates the new stable identity, checks references/ownership/protec
 Normal turns use one AI request, with a maximum of two for a correction. Private diplomacy only calls AI when requested. Wild Map sends a smaller ownership-focused snapshot rather than planning armies and economic actions for each nation. The single-generation RX 6750 XT profile and local history compaction remain in force; actual GPU memory, speed and model creativity have not been measured here. See AI.md.
 
 Strategy mode remains available in campaign creation/Host settings for the earlier bounded nation-order simulation. Whole-turn checkpoints can undo either mode. This is an original simplified map sandbox, not full Pax Historia feature parity.
+
+
+Version 3.4 adds optional agreements for NPC treaty/union consent or breaking a treaty. They use normal costs, identity checks and reciprocal human consent. They do not add independent NPC military/economic planning. AI execution uses immediate background-job responses and short result polls; queued follow-ups see earlier committed dialogue. Strategy mode cannot use director map patches to bypass its order/combat rules.

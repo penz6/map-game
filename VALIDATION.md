@@ -64,3 +64,14 @@ All **93 tests passed together**. Public-mode backend HTTP works without a trust
 Compose configuration and JavaScript syntax validated. The updated amd64 image built successfully. The new Docker smoke run was not executed: automatic approval review could not complete because workspace credits were exhausted. This is an infrastructure review failure, not an unsafe-action determination. Earlier release smoke results do not substitute for this version's unrun check. No live Pangolin/Traefik instance or public endpoint was exercised, and no GitHub image was published.
 
 This change addresses proxy configuration and application rate limiting. The other gameplay/concurrency findings in the separate 3.2 audit remain outstanding.
+
+
+## Audit closure and background AI jobs (3.4 — October 16, 2026)
+
+All **105 tests passed together** on the final runtime source. Added checks cover delayed-body join/authorization, revocation during password hashing, stale saved-room protection, fresh sequential NPC context, recipient claim changes, immediate private background jobs, idempotency-key replay/mismatch, bounded admission/expiry, queued-turn failure unlocking, NPC treaty/unification consent, Strategy patch rejection and post-order conflict preflight.
+
+Two-context Chromium checks passed for the default Wild Map (real ownership/colors, selected successor disappearing after rewind, cleared future history, no false connection loss, reload and mobile layout) and the structured army/politics/diplomacy/advisor/scenario workflow. Browser checks additionally exposed and verified a repair for a late turn result clearing the next round's local draft.
+
+The updated amd64 image built and its final Docker smoke passed non-root/read-only operation, health, authentication, SIGKILL/restart persistence and shared-volume exclusion. Compose and JavaScript syntax validated. GitHub Actions run 38909272680 also passed the previous 3.3 head's test and image/smoke job, superseding that version's earlier local infrastructure-blocked check. New-head CI is reported in the PR. No registry publication or merge is implied.
+
+Reproducible context measurements are in scripts/context-report.mjs and AI.md. They use the app's conservative input bound, not a model tokenizer. No live Ollama response-quality benchmark, physical RX 6750 XT, public Pangolin/Traefik route, arm64 runtime or independent penetration test was exercised. All eight original audit findings have implementation fixes; product limitations remain documented in FEATURES.md and AUDIT.md.

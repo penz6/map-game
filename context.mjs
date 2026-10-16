@@ -41,6 +41,8 @@ export function worldContext(room, player, nearby) {
   if(room.world.mapMode==='wild')return{
     mapMode:'wild',protectPlayers:room.world.protectPlayers,premise:room.world.premise,date:room.world.date,round:room.round,
     countryColumns:['id','name','color','capital','human'],countries:room.world.countries.map(c=>[c.id,c.name,c.color,c.capital,(room.players||[]).some(p=>p.country===c.id)]),
+    treaties:room.world.treaties,
+    diplomaticColumns:['id','treasury','government','ideology','leader','status'],diplomaticNations:room.world.countries.map(c=>[c.id,c.treasury,c.government,c.ideology,c.leader,c.status]),
     territoryColumns:['id','name','owner'],territories:room.world.regions.map(r=>[r.id,r.name,r.owner]),
     ...(player?{player:{id:player.id,country:player.country,nearby}}:{})
   };
