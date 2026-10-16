@@ -1,0 +1,42 @@
+name: historia
+services:
+  app:
+    image: ${HISTORIA_IMAGE:-ghcr.io/penz6/map-game:latest}
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the exact HTTPS origin in .env}
+      MFA_ENCRYPTION_KEY_FILE: /run/secrets/mfa_key
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      AI_MAX_CONCURRENCY: ${AI_MAX_CONCURRENCY:-1}
+      AI_CONTEXT_LENGTH: ${AI_CONTEXT_LENGTH:-20480}
+      AI_BATCH_SIZE: ${AI_BATCH_SIZE:-128}
+      AI_TURN_OUTPUT_TOKENS: ${AI_TURN_OUTPUT_TOKENS:-3072}
+      AI_CHAT_OUTPUT_TOKENS: ${AI_CHAT_OUTPUT_TOKENS:-768}
+      AI_KEEP_ALIVE_SECONDS: ${AI_KEEP_ALIVE_SECONDS:-300}
+      AI_THINK: ${AI_THINK:-default}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-180}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    volumes:
+      - game_data:/data
+    secrets:
+      - mfa_key
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 15s
+secrets:
+  mfa_key:
+    file: ./secrets/mfa_key
+volumes:
+  game_data:

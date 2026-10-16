@@ -1,0 +1,16 @@
+{
+  "name": "historia-local",
+  "version": "3.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Local multiplayer alternate-history sandbox with Ollama",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "admin": "node manage.mjs create-admin"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "license": "MIT"
+}
