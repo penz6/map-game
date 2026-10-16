@@ -84,3 +84,13 @@ All **115 tests passed together**. Configuration rejects values above 20,000, an
 A 12-player API/Ollama-adapter test verified every num_ctx equals 20,000 and every conservative input plus output/framing bound stays at or below it while the shared map commits once. Scenario/prompt configurations and future proposed worlds are checked for minimum capacity before saving. The reproducible context report uses controlled outcomes; its largest measured total bound was 19,242, not an actual tokenizer or GPU benchmark. Long optional history/diplomacy still compacts separately.
 
 The updated amd64 Docker image built and passed non-root/read-only health, authentication, SIGKILL/restart persistence and shared-volume exclusion. Wild Map two-context Chromium checks passed actual ownership changes, successor selection after rewind, reload and mobile layout. Compose and JavaScript syntax checks passed. No live Ollama model, actual RX 6750 XT memory/latency, real ingress or arm64 execution was tested. New-head CI is reported in the PR.
+
+## 32K context and composable map settlements (3.6 — October 16, 2026)
+
+All **121 tests passed together**. The app and native Ollama adapter now use a default/maximum total context of 32,768; larger values are refused and schema/output/framing reserves remain enforced. Tests cover all 36 maximum-length policies in both modes, staged rollback/forgery, and an essential-state rejection fixture enlarged for the new window.
+
+Six additional map checks cover a cross-border new-state federation plus regime change, collapse successor refs, ref lifetime, eight-operation admission/ninth-operation refusal, duplicate/forward/malformed/misplaced refs with rollback, player protection and exact Wild Map adjacency/schema encoding.
+
+The updated two-context Chromium check passed the actual shared cross-border state, map highlighting, subsequent collapse/merger, reload, mobile layout and rewind after selecting a successor. Controlled model responses were used. JavaScript syntax and Compose configuration passed. The amd64 Docker image built and smoke passed non-root/read-only startup, login, SIGKILL/restart persistence and exclusive-volume locking.
+
+The current reproducible report (`node scripts/context-report.mjs`) uses one call for 12 players with three 300-character policies each, seven for all maximum-length ASCII policies, and thirteen for maximum-length multibyte policies, in both modes. Highest conservative input-plus-output/framing bound: **32,170**. These are controlled budget results, not live model quality, speed or exact tokenizer/VRAM measurements. The RX 6750 XT, real Ollama generation and live Pangolin endpoint remain unbenchmarked.

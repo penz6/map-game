@@ -44,6 +44,8 @@ export function worldContext(room, player, nearby) {
     treaties:room.world.treaties,
     diplomaticColumns:['id','treasury','government','ideology','leader','status'],diplomaticNations:room.world.countries.map(c=>[c.id,c.treasury,c.government,c.ideology,c.leader,c.status]),
     territoryColumns:['id','name','owner'],territories:room.world.regions.map(r=>[r.id,r.name,r.owner]),
+    routeEncoding:'Undirected pairs of row indexes in territories. Use this geography to favor connected borders; islands and negotiated enclaves remain allowed.',
+    routes:room.world.regions.flatMap((r,i)=>r.neighbors.map(id=>room.world.regions.findIndex(p=>p.id===id)).filter(j=>j>i).map(j=>[i,j])),
     ...(player?{player:{id:player.id,country:player.country,nearby}}:{})
   };
   return {
@@ -59,7 +61,7 @@ export function worldContext(room, player, nearby) {
 }
 
 export function compactRequest({ room, messages, format, contextLength, outputTokens }) {
-  check(Number.isInteger(contextLength)&&contextLength<=20000,'AI context cannot exceed the 20,000-token application ceiling.',413);
+  check(Number.isInteger(contextLength)&&contextLength<=32768,'AI context cannot exceed the 32,768-token application ceiling.',413);
   const budget = contextLength - outputTokens - 512; // template/system framing safety margin
   check(budget > 0, 'AI context is too small for the configured output reserve.');
   const input = JSON.parse(messages[1].content);
@@ -107,6 +109,6 @@ export function compactRequest({ room, messages, format, contextLength, outputTo
   while (!fits() && dialogue.length) { dialogue.shift(); update(); }
   while (!fits() && diplomacy.length) { diplomacy.shift(); update(); }
   if (!fits() && recent.length) { recent = []; update(); }
-  check(fits(), 'Essential AI input exceeds the context budget. Shorten the system prompt, world premise, message or submitted policies, or reduce scenario size/output reserve. The model is capped at 20,000 context. No orders or world changes were applied.', 413);
+  check(fits(), 'Essential AI input exceeds the context budget. Shorten the system prompt, world premise, message or submitted policies, or reduce scenario size/output reserve. The model is capped at 32,768 context. No orders or world changes were applied.', 413);
   return { messages: packed, inputBound: requestTokenBound(packed, format), inputBudget: budget, outputTokens, compacted: JSON.parse(packed[1].content).contextCompaction.compacted };
 }

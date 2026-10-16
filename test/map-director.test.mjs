@@ -25,3 +25,33 @@ test('Strategy rejects all director map patches rather than bypassing combat and
 test('director conflicts with structured orders are rejected during validation before commit',()=>{
  const r=room(),before=structuredClone(r.world);r.players[0].orders=[{type:'rename',name:'Tea Republic'}];assert.throws(()=>validateAI(r,response([{type:'secede',country:'GB',provinces:['GB1'],name:'Tea Republic'}])),/names must be unique/);assert.deepEqual(r.world,before);
 });
+test('new-state references build a cross-border federation and set its regime in one atomic turn',()=>{
+ const r=room(),next=resolveTurn(r,validateAI(r,response([
+  {type:'secede',country:'GB',provinces:['GB1'],name:'Tea Federation',ref:'$tea',color:'#cc4499'},
+  {type:'transfer',country:'IE',targetCountry:'$tea',provinces:['IE1']},
+  {type:'regime',country:'$tea',government:'council',ideology:'socialist',leader:'Tea committee'},
+  {type:'rename',country:'$tea',name:'United Tea Federation'}
+ ]))),state=next.world.countries.find(c=>c.name==='United Tea Federation');
+ assert(state);assert.equal(state.government,'council');assert.equal(state.leader,'Tea committee');assert.deepEqual(next.world.regions.filter(p=>p.owner===state.id).map(p=>p.id).sort(),['GB1','IE1']);
+ assert.equal(next.history[0].mapChanges[1].targetCountry,state.id);assert.deepEqual(next.history[0].mapChanges[0].createdCountries,[state.id]);integrity(next.world);
+});
+test('collapse part references permit a follow-up border settlement and expire after the transaction',()=>{
+ const r=room(),patch=applyMapChanges(r.world,[{type:'collapse',country:'IT',parts:[{name:'Northern Republic',ref:'$north',provinces:['IT0']},{name:'Southern Republic',ref:'$south',provinces:['IT1','IT2']}]},{type:'transfer',country:'$south',targetCountry:'$north',provinces:['IT1']}],r.players,{requireOwnershipChange:true});
+ const north=patch.world.countries.find(c=>c.name==='Northern Republic');assert.equal(patch.world.regions.find(p=>p.id==='IT1').owner,north.id);integrity(patch.world);
+ assert.throws(()=>applyMapChanges(patch.world,[{type:'rename',country:'$north',name:'Unknown Ref'}],r.players),/Unknown map-change/);
+});
+test('eight map operations work and a ninth is refused without partial state changes',()=>{
+ const r=room(),changes=[transfer,...['BE','NL','IT','DE','ES','PT','NO'].map((country,i)=>({type:'rename',country,name:'New State '+i}))];
+ assert.equal(applyMapChanges(r.world,changes,r.players).records.length,8);const before=structuredClone(r.world);assert.throws(()=>applyMapChanges(r.world,[...changes,{type:'rename',country:'SE',name:'Ninth'}],r.players),/eight mapChanges/);assert.deepEqual(r.world,before);
+});
+test('unknown, duplicate, malformed and misplaced refs roll back the whole transaction',()=>{
+ const r=room(),before=structuredClone(r.world),first={type:'secede',country:'GB',name:'Tea State',ref:'$tea',provinces:['GB1']};
+ for(const changes of[[{type:'transfer',country:'GB',targetCountry:'$future',provinces:['GB1']},first],[first,{type:'secede',country:'IE',name:'Tea Two',ref:'$tea',provinces:['IE1']}],[{...first,ref:'__proto__'}],[{...transfer,ref:'$invalid'}],[first,{type:'transfer',country:'$tea',targetCountry:'IE',provinces:['GB2']}]]){assert.throws(()=>applyMapChanges(r.world,changes,r.players));assert.deepEqual(r.world,before);}
+});
+test('refs cannot bypass human identity and last-province protections',()=>{
+ const r=room();assert.throws(()=>applyMapChanges(r.world,[{type:'secede',country:'FR',name:'Baguette',ref:'$bread',provinces:['FR1','FR2']},{type:'transfer',country:'FR',targetCountry:'$bread',provinces:['FR0']}],r.players),/at least one province/);
+});
+test('Wild Map sends an exact undirected geography graph and advertises refs in its schema',async()=>{
+ const r=room(),ctx=worldContext(r);for(const [i,row]of ctx.territories.entries()){const adjacent=ctx.routes.filter(pair=>pair.includes(i)).map(pair=>ctx.territories[pair.find(j=>j!==i)][0]);assert.deepEqual(adjacent.sort(),r.world.regions.find(p=>p.id===row[0]).neighbors.slice().sort());}
+ const {mapChangeSchema}=await import('../map-director.mjs');assert(new RegExp(mapChangeSchema.properties.ref.pattern).test('$tea'));assert(!new RegExp(mapChangeSchema.properties.ref.pattern).test('__proto__'));
+});

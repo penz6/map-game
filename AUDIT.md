@@ -32,9 +32,14 @@ Idempotency-Key replay is supported while the job remains cached; a different bo
 
 The feature matrix is in FEATURES.md. The game is not full Pax Historia parity. Global maps, visual scenario editing, generic map objects, per-event intervention, branching scenes, group diplomacy and custom workflow execution remain unimplemented. Detailed naval/air/logistics/economic simulation is absent.
 
-Context is capped at 20,000 total. Large groups and long policies use sequential bounded passes; all full policies are read in a batch or an explicit source-compression pass and remain saved. The final world pass sees lossy intent summaries. Extremely large/custom scenarios and prompts are rejected if essential state still cannot fit. Staged turns take more model calls and still have no real-model quality/latency benchmark. Compaction may drop optional old negotiations; private model narration is instructed not to quote them, but is not a cryptographic secrecy boundary. Public consequences can reveal arrangements. The server/Ollama operator is trusted.
+Context is capped at 32,768 total in 3.6. Large groups and long policies use sequential bounded passes; all full policies are read in a batch or an explicit source-compression pass and remain saved. The final world pass sees lossy intent summaries. Extremely large/custom scenarios and prompts are rejected if essential state still cannot fit. Staged turns take more model calls and still have no real-model quality/latency benchmark. Compaction may drop optional old negotiations; private model narration is instructed not to quote them, but is not a cryptographic secrecy boundary. Public consequences can reveal arrangements. The server/Ollama operator is trusted.
 
 Pangolin/Traefik remains responsible for external HTTPS/network routing by the user's deployment choice. App Host/Origin checks, Secure cookies and authentication remain enforced without a proxy-IP allowlist. Username throttling can temporarily block a targeted username; it no longer creates a 15-minute lockout shared by every proxy user.
 
 
 Version 3.5 adds the strict 20K ceiling, scoped policy snapshots and bounded staged planning. Ownership/identity and applicable resource/action checks remain authoritative, combined results are validated before one commit, and setup/future-world capacity is checked before saving. No context increase is used as a fallback.
+
+
+## Version 3.6 update
+
+The earlier 3.5 measurements describe the prior 20K release. Current default and maximum total context are 32,768, with output/schema/framing reserves and compaction retained. Wild Map supports eight sequential operations and transaction-local new-state refs; invalid refs, ownership, human protections and final capacity reject the entire proposal. Exact adjacency is supplied as reference data. No new tool/network/account authority is granted. See AI.md for current measurements and memory limitations.

@@ -66,3 +66,8 @@ Strategy rejects director map patches; Wild Map diplomatic agreements are restri
 
 
 Version 3.5 enforces a 20,000 context ceiling in configuration and in each request budget, including schema/output/framing. Oversized turns use bounded sequential passes with original identity/index validation, aggregate action-budget checks, no human impersonation and one final atomic commit. Model-derived summaries are labeled lossy reference data, never authority to change permissions. Scenario/prompt and proposed successor-world capacity checks reject impossible configurations before persistence.
+
+
+## Version 3.6 update
+
+The earlier 3.5 measurements describe the prior 20K release. Current default and maximum total context are 32,768, with output/schema/framing reserves and compaction retained. Wild Map supports eight sequential operations and transaction-local new-state refs; invalid refs, ownership, human protections and final capacity reject the entire proposal. Exact adjacency is supplied as reference data. No new tool/network/account authority is granted. See AI.md for current measurements and memory limitations.

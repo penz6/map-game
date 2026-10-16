@@ -6,7 +6,7 @@ The single director receives the current map, human seats, all submitted orders,
 
 ## What changes
 
-Every successful AI turn must include at least one actual province ownership change. Up to four map operations are allowed:
+Every successful AI turn must include at least one actual province ownership change. Up to eight map operations are allowed:
 
 - Transfer provinces to an existing nation, including restoring a retired nation.
 - Create a named, colored successor from selected provinces.
@@ -28,9 +28,27 @@ For example, an AI response can include:
 
 The server allocates the new stable identity, checks references/ownership/protected seats and applies the complete transaction. Model text has no shell, filesystem, account or arbitrary code privileges. Invalid JSON/proposals receive one correction attempt. A second rejection preserves world, date, saved orders and timer state; headlines are not silently committed as map changes. Connection, timeout and output-length failures require host retry. Demo mode does not call AI or provide these director changes.
 
-Small turns use one AI request, with at most one correction. Version 3.5 splits large turns into bounded policy passes and one final world pass, each under 20,000 total context; this takes more sequential calls, not independent AI nation agents. Private diplomacy only calls AI when requested. Wild Map sends a smaller ownership-focused snapshot rather than planning armies and economic actions for each nation. The single-generation RX 6750 XT profile and local history compaction remain in force; actual GPU memory, speed and model creativity have not been measured here. See AI.md.
+Small turns use one AI request, with at most one correction. Version 3.6 splits large turns into bounded policy passes and one final world pass, each under 32,768 total context; this takes more sequential calls, not independent AI nation agents. Private diplomacy only calls AI when requested. Wild Map sends a smaller ownership-focused snapshot rather than planning armies and economic actions for each nation. The single-generation RX 6750 XT profile and local history compaction remain in force; actual GPU memory, speed and model creativity have not been measured here. See AI.md.
 
 Strategy mode remains available in campaign creation/Host settings for the earlier bounded nation-order simulation. Whole-turn checkpoints can undo either mode. This is an original simplified map sandbox, not full Pax Historia feature parity.
 
 
 Version 3.4 adds optional agreements for NPC treaty/union consent or breaking a treaty. They use normal costs, identity checks and reciprocal human consent. They do not add independent NPC military/economic planning. AI execution uses immediate background-job responses and short result polls; queued follow-ups see earlier committed dialogue. Strategy mode cannot use director map patches to bypass its order/combat rules.
+
+## Composable territorial settlements (3.6)
+
+A `secede` operation can declare `ref: "$tea"`; each `collapse.parts` entry can declare its own ref. Later operations in that same response can use the ref as `country` or `targetCountry`. Declarations must precede use, must be unique, and must match `$` followed by 1–24 lowercase letters/digits/underscores starting with a letter. Refs never persist or work in diplomatic `agreements`; the next world snapshot supplies real IDs.
+
+For example, this creates one state from land in two countries and gives it a government:
+
+```json
+[
+  {"type":"secede","country":"GB","provinces":["GB1"],"name":"Tea Federation","color":"#cc4499","ref":"$tea"},
+  {"type":"transfer","country":"IE","targetCountry":"$tea","provinces":["IE1"]},
+  {"type":"regime","country":"$tea","government":"council","ideology":"socialist","leader":"Tea committee"}
+]
+```
+
+Ownership is checked after preceding operations. Duplicate/unknown/forward refs or invalid later operations reject the whole response without partial changes. History records actual created/recipient IDs, and the UI already renders their ownership, color and labels. No model-selected stable IDs or executable tools are involved.
+
+The director now receives exact province adjacency as undirected territory-row pairs. Its default prompt favors connected settlements, responds to policy/diplomacy, preserves continuity, spreads attention across players, and allows intentional island/enclave surprises. Geography guides the model; it is not a hard ban on disconnected countries. Map polygon shapes remain fixed; this changes ownership and state identities rather than generating new geometry.

@@ -378,9 +378,9 @@ test('a queued NPC message is rejected before generation when a human claims tha
  const first=f.req(`/rooms/${r.id}/advisor`,{text:'Hold slot'},f.admin);await began;const pending=f.req(`/rooms/${r.id}/chat`,{to:'IT',text:'To the NPC'},u);await pause(30);assert.equal((await f.join(r,v,'IT')).status,201);release();assert.equal((await first).status,200);assert.equal((await pending).status,409);assert.equal(calls,1);
 });
 
-test('twelve-player maximum-policy turn is staged through Ollama with every request under 20K',async t=>{
+test('twelve-player maximum-policy turn is staged through Ollama with every request under 32K',async t=>{
  let calls=0,finals=0;const seen=new Map();const {requestTokenBound}=await import('../context.mjs');
- const f=await setup(t,{fetchAI:async(url,opts)=>{calls++;const payload=JSON.parse(opts.body);assert.equal(payload.options.num_ctx,20000);assert(requestTokenBound(payload.messages,payload.format)+payload.options.num_predict+512<=20000);const input=JSON.parse(payload.messages[1].content);let result;
+ const f=await setup(t,{fetchAI:async(url,opts)=>{calls++;const payload=JSON.parse(opts.body);assert.equal(payload.options.num_ctx,32768);assert(requestTokenBound(payload.messages,payload.format)+payload.options.num_predict+512<=32768);const input=JSON.parse(payload.messages[1].content);let result;
   if(input.phase==='policyBatch'){for(const p of input.policyBatch)seen.set(`${p.playerId}:${p.orderIndex}`,p.text);result={policies:input.policyBatch.map(p=>({playerId:p.playerId,orderIndex:p.orderIndex,outcome:'Recognition is sought.',intent:'Support independent tea states.'}))};}
   else {assert.equal(input.phase,'worldResolution');finals++;result={events:[{title:'The tea border',body:'A settlement changes British territory.'}],mapChanges:[{type:'transfer',country:'GB',targetCountry:'IE',provinces:['GB1']}]};}
   return Response.json({message:{content:JSON.stringify(result)}});

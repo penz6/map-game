@@ -1,16 +1,20 @@
 import { createHash } from 'node:crypto';
 import { check,clamp } from './rules.mjs';
+export const MAX_MAP_CHANGES=8;
+const refSchema={type:'string',pattern:'^\\$[a-z][a-z0-9_]{0,23}$'};
 const requireMap=(ok,message)=>check(ok,message,502);
 const validName=name=>typeof name==='string'&&name.trim().length>0&&name.length<=50;
-export const mapChangeSchema={type:'object',additionalProperties:false,required:['type','country'],properties:{type:{type:'string',enum:['transfer','secede','merge','collapse','rename','regime']},country:{type:'string'},targetCountry:{type:'string'},provinces:{type:'array',minItems:1,maxItems:24,items:{type:'string'}},name:{type:'string'},color:{type:'string'},government:{type:'string',enum:['republic','monarchy','dictatorship','council']},ideology:{type:'string',enum:['liberal','conservative','socialist','nationalist','nonaligned']},leader:{type:'string'},parts:{type:'array',minItems:2,maxItems:4,items:{type:'object',additionalProperties:false,required:['name','provinces'],properties:{name:{type:'string'},color:{type:'string'},provinces:{type:'array',minItems:1,maxItems:24,items:{type:'string'}}}}}}};
+export const mapChangeSchema={type:'object',additionalProperties:false,required:['type','country'],properties:{type:{type:'string',enum:['transfer','secede','merge','collapse','rename','regime']},country:{type:'string'},ref:refSchema,targetCountry:{type:'string'},provinces:{type:'array',minItems:1,maxItems:24,items:{type:'string'}},name:{type:'string'},color:{type:'string'},government:{type:'string',enum:['republic','monarchy','dictatorship','council']},ideology:{type:'string',enum:['liberal','conservative','socialist','nationalist','nonaligned']},leader:{type:'string'},parts:{type:'array',minItems:2,maxItems:4,items:{type:'object',additionalProperties:false,required:['name','provinces'],properties:{ref:refSchema,name:{type:'string'},color:{type:'string'},provinces:{type:'array',minItems:1,maxItems:24,items:{type:'string'}}}}}}};
 
 // This is a transactional world-state patcher, never a model tool executor.
 // It returns a separate world; failed validation cannot partly mutate a save.
 export function applyMapChanges(world,changes,players,{requireOwnershipChange=false,protectPlayers=world.protectPlayers!==false,seed='world'}={}){
- requireMap(Array.isArray(changes)&&changes.length<=4,'Return at most four mapChanges.');
+ requireMap(Array.isArray(changes)&&changes.length<=MAX_MAP_CHANGES,'Return at most eight mapChanges.');
  const w=structuredClone(world),records=[],events=[],human=new Set(players.map(p=>p.country)),previous=new Map(world.regions.map(p=>[p.id,p.owner]));
  const protectedNations=new Set(players.filter(p=>world.regions.some(r=>r.owner===p.country)).map(p=>p.country));
- const nation=id=>{const n=w.countries.find(n=>n.id===id);requireMap(n,`Unknown map-change nation ID: ${String(id).slice(0,30)}.`);return n;};
+ const refs=new Map();
+ const bind=(ref,id)=>{if(ref===undefined)return;requireMap(typeof ref==='string'&&/^\$[a-z][a-z0-9_]{0,23}$/.test(ref)&&!refs.has(ref),'New nation refs must be unique $lowercase identifiers (up to 24 letters/digits/underscores).');refs.set(ref,id);};
+ const nation=id=>{id=refs.get(id)||id;const n=w.countries.find(n=>n.id===id);requireMap(n,`Unknown map-change nation ID: ${String(id).slice(0,30)}.`);return n;};
  const provinces=(ids,country)=>{
   requireMap(Array.isArray(ids)&&ids.length>0&&ids.length<=24&&new Set(ids).size===ids.length,'Use 1–24 unique province IDs.');
   return ids.map(id=>{const r=w.regions.find(r=>r.id===id);requireMap(r&&r.owner===country,'Map changes must name provinces currently owned by their source country.');return r;});
@@ -28,13 +32,14 @@ export function applyMapChanges(world,changes,players,{requireOwnershipChange=fa
  };
  for(const raw of changes){
   requireMap(raw&&typeof raw==='object'&&!Array.isArray(raw),'Invalid map change.');
-  const c=nation(raw.country),type=raw.type;let affected=[],description='';
+  const c=nation(raw.country),type=raw.type;let affected=[],description='',created=[];
+  requireMap(raw.ref===undefined||type==='secede','Only a secession may declare a top-level ref.');
   requireMap(['transfer','secede','merge','collapse','rename','regime'].includes(type),'Unknown map change type.');
   if(type==='transfer'){
    const target=nation(raw.targetCountry);requireMap(target.id!==c.id,'A territorial transfer needs a different recipient.');affected=provinces(raw.provinces,c.id);affected.forEach(p=>p.owner=target.id);target.status='active';description=`${c.name} transfers ${affected.map(p=>p.name).join(', ')} to ${target.name}.`;
   }
   if(type==='secede'){
-   affected=provinces(raw.provinces,c.id);const child=create(c,raw.name,raw.color,affected);description=`${child.name} (${child.id}) breaks away from ${c.name}, taking ${affected.map(p=>p.name).join(', ')}.`;
+   affected=provinces(raw.provinces,c.id);const child=create(c,raw.name,raw.color,affected);bind(raw.ref,child.id);created.push(child.id);description=`${child.name} (${child.id}) breaks away from ${c.name}, taking ${affected.map(p=>p.name).join(', ')}.`;
   }
   if(type==='merge'){
    const target=nation(raw.targetCountry);requireMap(target.id!==c.id,'Choose a different merger recipient.');requireMap(!human.has(c.id),'A map merger cannot delete a human government identity; use a partial transfer or secession.');
@@ -44,7 +49,7 @@ export function applyMapChanges(world,changes,players,{requireOwnershipChange=fa
    requireMap(!human.has(c.id),'Do not delete a human identity in a collapse; use secede to leave a remnant.');
    requireMap(Array.isArray(raw.parts)&&raw.parts.length>=2&&raw.parts.length<=4,'A collapse needs two to four successor parts.');
    const owned=w.regions.filter(p=>p.owner===c.id),ids=raw.parts.flatMap(p=>p?.provinces||[]);requireMap(owned.length>0&&ids.length===owned.length&&new Set(ids).size===ids.length&&owned.every(p=>ids.includes(p.id)),'Collapse successors must partition all source provinces exactly once.');requireMap(w.countries.length+raw.parts.length<=64,'Too many successor nations.');
-   const children=[];for(const part of raw.parts){const land=provinces(part.provinces,c.id);affected.push(...land);children.push(create(c,part.name,part.color,land));}c.status='annexed';c.capital=null;description=`${c.name} collapses into ${children.map(n=>n.name+' ('+n.id+')').join(', ')}.`;
+   const children=[];for(const part of raw.parts){const land=provinces(part.provinces,c.id);affected.push(...land);const child=create(c,part.name,part.color,land);bind(part.ref,child.id);children.push(child);created.push(child.id);}c.status='annexed';c.capital=null;description=`${c.name} collapses into ${children.map(n=>n.name+' ('+n.id+')').join(', ')}.`;
   }
   if(type==='rename'){
    const previousName=c.name;c.name=name(raw.name,c.id);c.color=color(raw.color,c.color);affected=w.regions.filter(p=>p.owner===c.id);description=`${previousName} becomes ${c.name}.`;
@@ -52,7 +57,7 @@ export function applyMapChanges(world,changes,players,{requireOwnershipChange=fa
   if(type==='regime'){
    requireMap(['republic','monarchy','dictatorship','council'].includes(raw.government)&&['liberal','conservative','socialist','nationalist','nonaligned'].includes(raw.ideology),'Invalid director government or ideology.');requireMap(typeof raw.leader==='string'&&raw.leader.trim().length>0&&raw.leader.length<=60,'Use a leader name of 1–60 characters.');c.government=raw.government;c.ideology=raw.ideology;c.leader=raw.leader.trim();description=`${c.name} becomes a ${c.ideology} ${c.government} led by ${c.leader}.`;
   }
-  records.push({type,country:c.id,provinces:affected.map(p=>p.id),description});events.push({title:'Map changes: '+type,body:description});
+  records.push({type,country:c.id,...(raw.targetCountry?{targetCountry:nation(raw.targetCountry).id}:{}),...(created.length?{createdCountries:created}:{}),provinces:affected.map(p=>p.id),description});events.push({title:'Map changes: '+type,body:description});
  }
  const changedProvinces=w.regions.filter(p=>previous.get(p.id)!==p.owner).map(p=>p.id);
  requireMap(!requireOwnershipChange||changedProvinces.length>0,'Wild map mode requires at least one actual province ownership change. A headline, regime change or rename alone is not enough.');

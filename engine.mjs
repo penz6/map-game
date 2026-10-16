@@ -1,6 +1,6 @@
 import { check } from './rules.mjs';
 import { validateOrders,resolveTurn as resolveStrategyTurn } from './strategy.mjs';
-import { applyMapChanges,mapChangeSchema } from './map-director.mjs';
+import { applyMapChanges,mapChangeSchema,MAX_MAP_CHANGES } from './map-director.mjs';
 export { GameError, check, clamp } from './rules.mjs';
 export { validateOrders, costs, governments, ideologies } from './strategy.mjs';
 const actionSchema={type:'object',additionalProperties:false,required:['country','type'],properties:{country:{type:'string'},type:{type:'string',enum:['invest','mobilize','stabilize','recruit','move','attack','government','rename','release','cede','annex','merge','treaty','breakTreaty']},target:{type:'string'},unit:{type:'string'},name:{type:'string'},targetCountry:{type:'string'},terms:{type:'string',enum:['trade','nonaggression','alliance']},government:{type:'string',enum:['republic','monarchy','dictatorship','council']},ideology:{type:'string',enum:['liberal','conservative','socialist','nationalist','nonaligned']},leader:{type:'string'}}};
@@ -10,7 +10,7 @@ export const turnSchema={type:'object',additionalProperties:false,required:['eve
  mapChanges:{type:'array',maxItems:0},
  npcOrders:{type:'array',maxItems:8,items:{$ref:'#/$defs/action'}}
 },$defs:{action:actionSchema}};
-export const directorTurnSchema={type:'object',additionalProperties:false,required:['events','policies','mapChanges'],properties:{events:turnSchema.properties.events,policies:{type:'array',maxItems:36,items:{type:'object',additionalProperties:false,required:['playerId','orderIndex','outcome'],properties:{playerId:{type:'string'},orderIndex:{type:'integer'},outcome:{type:'string'}}}},mapChanges:{type:'array',minItems:1,maxItems:4,items:mapChangeSchema},agreements:{type:'array',maxItems:8,items:{...actionSchema,properties:{country:actionSchema.properties.country,type:{type:'string',enum:['treaty','merge','breakTreaty']},targetCountry:actionSchema.properties.targetCountry,terms:actionSchema.properties.terms}}}}};
+export const directorTurnSchema={type:'object',additionalProperties:false,required:['events','policies','mapChanges'],properties:{events:turnSchema.properties.events,policies:{type:'array',maxItems:36,items:{type:'object',additionalProperties:false,required:['playerId','orderIndex','outcome'],properties:{playerId:{type:'string'},orderIndex:{type:'integer'},outcome:{type:'string'}}}},mapChanges:{type:'array',minItems:1,maxItems:MAX_MAP_CHANGES,items:mapChangeSchema},agreements:{type:'array',maxItems:8,items:{...actionSchema,properties:{country:actionSchema.properties.country,type:{type:'string',enum:['treaty','merge','breakTreaty']},targetCountry:actionSchema.properties.targetCountry,terms:actionSchema.properties.terms}}}}};
 export function validateAI(room,ai){
  check(ai&&Array.isArray(ai.events)&&ai.events.length>=1&&ai.events.length<=8,'AI returned invalid events.',502);
  const events=ai.events.map(e=>{check(e&&typeof e.title==='string'&&e.title.length>0&&e.title.length<=160&&typeof e.body==='string'&&e.body.length>0&&e.body.length<=3000,'AI event is invalid.',502);return {title:e.title,body:e.body};});
