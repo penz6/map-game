@@ -1,0 +1,1 @@
+export function nearbyCountries(world,own){const ids=new Set();for(const r of world.regions.filter(r=>r.owner===own))for(const id of r.neighbors){const n=world.regions.find(n=>n.id===id);if(n&&n.owner!==own)ids.add(n.owner);}return [...ids].sort();}
