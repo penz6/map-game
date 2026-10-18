@@ -8,7 +8,7 @@ export const mapChangeSchema={type:'object',additionalProperties:false,required:
 
 // This is a transactional world-state patcher, never a model tool executor.
 // It returns a separate world; failed validation cannot partly mutate a save.
-export function applyMapChanges(world,changes,players,{requireOwnershipChange=false,protectPlayers=world.protectPlayers!==false,seed='world'}={}){
+export function applyMapChanges(world,changes,players,{limitHumanGains=false,requireOwnershipChange=false,protectPlayers=world.protectPlayers!==false,seed='world'}={}){
  requireMap(Array.isArray(changes)&&changes.length<=MAX_MAP_CHANGES,'Return at most eight mapChanges.');
  const w=structuredClone(world),records=[],events=[],human=new Set(players.map(p=>p.country)),previous=new Map(world.regions.map(p=>[p.id,p.owner]));
  const protectedNations=new Set(players.filter(p=>world.regions.some(r=>r.owner===p.country)).map(p=>p.country));
@@ -58,6 +58,12 @@ export function applyMapChanges(world,changes,players,{requireOwnershipChange=fa
    requireMap(['republic','monarchy','dictatorship','council'].includes(raw.government)&&['liberal','conservative','socialist','nationalist','nonaligned'].includes(raw.ideology),'Invalid director government or ideology.');requireMap(typeof raw.leader==='string'&&raw.leader.trim().length>0&&raw.leader.length<=60,'Use a leader name of 1–60 characters.');c.government=raw.government;c.ideology=raw.ideology;c.leader=raw.leader.trim();description=`${c.name} becomes a ${c.ideology} ${c.government} led by ${c.leader}.`;
   }
   records.push({type,country:c.id,...(raw.targetCountry?{targetCountry:nation(raw.targetCountry).id}:{}),...(created.length?{createdCountries:created}:{}),provinces:affected.map(p=>p.id),description});events.push({title:'Map changes: '+type,body:description});
+ }
+ // Bound model authority independently of prose, model size, and injected instructions.
+ if(limitHumanGains)for(const id of human){
+  const original=world.regions.filter(p=>p.owner===id).length,limit=Math.max(2,Math.ceil(original/4));
+  const gains=w.regions.filter(p=>p.owner===id&&previous.get(p.id)!==id).length;
+  requireMap(gains<=limit,`AI territorial gain limit exceeded for ${id}: at most ${limit} new provinces per human country per turn. Reduce territorial gifts; player demands or threats cannot override this limit.`);
  }
  const changedProvinces=w.regions.filter(p=>previous.get(p.id)!==p.owner).map(p=>p.id);
  requireMap(!requireOwnershipChange||changedProvinces.length>0,'Wild map mode requires at least one actual province ownership change. A headline, regime change or rename alone is not enough.');

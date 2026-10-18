@@ -167,7 +167,7 @@ test('editable prompts are host-only, atomic, persisted and supplied to private 
  await req(route('orders'),{orders:[{type:'policy',text:'SECRET UNCOMMITTED POLICY'}]},guest.token);
  await req(route('chat'),{to:'DE',text:'SECRET HUMAN CONVERSATION'},host.token);
  const answer=await req(route('chat'),{to:'IT',text:'Would you discuss trade?'},host.token);assert.equal(answer.status,200);
- assert(payload.messages[0].content.startsWith('Represent Italy (IT). Prefer peaceful trade.'));assert(payload.messages[0].content.includes(promptContracts.diplomacy));
+ assert(payload.messages[0].content.startsWith('Represent the addressed country in the supplied JSON (the addressed country ID in the supplied JSON). Prefer peaceful trade.'));assert.deepEqual(JSON.parse(payload.messages[1].content).addressedCountry,{id:'IT',name:'Italy'});assert(payload.messages[0].content.includes(promptContracts.diplomacy));
  assert(!JSON.stringify(payload).includes('SECRET UNCOMMITTED POLICY'));assert(!JSON.stringify(payload).includes('SECRET HUMAN CONVERSATION'));
  assert(payload.messages[1].content.includes('nearby'));
  assert.equal((await req(route(),null,guest.token)).body.messages.filter(m=>m.from==='IT'||m.to==='IT').length,0);
