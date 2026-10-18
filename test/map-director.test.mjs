@@ -1,4 +1,4 @@
-import{test}from'node:test';import assert from'node:assert/strict';import{scenario}from'../scenario.mjs';import{validateAI,resolveTurn}from'../engine.mjs';import{applyMapChanges}from'../map-director.mjs';import{worldContext}from'../context.mjs';
+import{test}from'node:test';import assert from'node:assert/strict';import{europeScenario as scenario}from'../scenario.mjs';import{validateAI,resolveTurn}from'../engine.mjs';import{applyMapChanges}from'../map-director.mjs';import{worldContext}from'../context.mjs';
 const room=()=>({id:'FFAA11',round:1,months:1,phase:'planning',world:scenario(),players:[{id:'human',name:'Player',country:'FR',orders:[]}],history:[]});
 const response=mapChanges=>({events:[{title:'The borders wobble',body:'A territorial settlement redraws the world.'}],policies:[],mapChanges});
 const transfer={type:'transfer',country:'GB',targetCountry:'IE',provinces:['GB1']};

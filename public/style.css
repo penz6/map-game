@@ -14,3 +14,72 @@
 .map-redraw-summary{margin:14px 0;padding:14px;background:#e9edda;border-left:3px solid #b79b38}
 .map-redraw-summary p{font-size:.85rem;line-height:1.5;margin:8px 0}
 .protect-label{display:flex;align-items:flex-start;gap:10px}.protect-label input{width:auto;margin:3px 0 0}
+
+/* The map is the board; controls float above it and secondary panels open on demand. */
+.shell{display:block;position:relative;min-height:calc(100dvh - 69px);overflow:hidden;background:#152c39}
+.shell .center{position:relative;width:100%}
+.shell .map-frame{height:calc(100dvh - 69px);min-height:600px;border:0;background:radial-gradient(ellipse at 45% 40%,#2b4957,#172f3d 80%)}
+.shell .map-toolbar{position:absolute;left:20px;top:20px;right:380px;height:auto;min-height:64px;z-index:3;border:1px solid #ffffff24;border-radius:10px;background:#152934ec;color:#f1eee5;padding:14px 18px;gap:20px;box-shadow:0 8px 24px #07131e22;pointer-events:none}
+.shell .map-toolbar .eyebrow,.shell .map-toolbar .muted{color:#b8c6cc}
+.shell .date{font-family:inherit;font-size:20px;font-weight:600;letter-spacing:-.04em}
+.shell .map-toolbar .badge{font-size:9px;white-space:nowrap}
+.shell .rightbar{position:absolute;top:20px;right:20px;bottom:20px;width:340px;z-index:5;border:1px solid #ffffff24;border-radius:12px;padding:0 20px 20px;overflow:auto;background:#f7f6f0f5;box-shadow:0 15px 45px #05142130;scrollbar-width:thin}
+.shell .rightbar .tabs{top:0;background:#f7f6f0;margin:0 -2px 20px;padding-top:5px}
+.shell .rightbar .tabs button{font-size:12px;padding:16px 4px;color:#6c777a}
+.shell .rightbar .tabs button.active{color:#193f48;border-bottom-color:#3c725e}
+.shell .panel-title{font:600 22px/1.2 ui-sans-serif,system-ui;letter-spacing:-.04em;margin:0 0 10px}
+.shell .rightbar textarea{min-height:130px;background:#fff;border-color:#d4dbd7;border-radius:7px}
+.shell .rightbar .tiny{line-height:1.65}
+.shell .rightbar label{margin-top:14px}
+.shell .rightbar button.primary{background:#244f50;border-color:#244f50;border-radius:7px}
+.shell .rightbar button.gold{background:#c9b58c;border-color:#c9b58c;border-radius:7px}
+.shell .order-card{border-radius:7px;background:#ecefe9;margin-bottom:9px}
+.shell .ready-box{margin-top:18px}
+.structured-actions{margin:18px 0 10px;color:var(--muted);font-size:11px}
+.structured-actions summary,.turn-clock summary{cursor:pointer;font-size:11px;user-select:none}
+.turn-clock:not([open]){border:0;padding:0;margin-bottom:14px}
+.turn-clock[open] summary{margin-bottom:12px}
+.shell .sidebar,.shell .chronicle{display:none;position:absolute;top:104px;left:20px;bottom:20px;width:300px;z-index:6;padding:24px;background:#f7f6f0f5;overflow:auto;border:1px solid #ffffff33;border-radius:10px;box-shadow:0 15px 45px #05142130}
+.shell .sidebar.open,.shell .chronicle.open{display:block}
+.shell .chronicle{width:min(440px,calc(100% - 400px));z-index:7}
+.drawer-close{position:absolute;right:10px;top:10px;font-size:20px}
+.shell .chronicle h2{font:600 24px ui-sans-serif,system-ui;margin:8px 0 20px}
+.shell .map-detail{top:104px;left:20px;padding:16px;border:1px solid #ffffff33;border-radius:9px;background:#f7f6f0f0;max-width:250px;z-index:4}
+.shell .map-detail strong{font:600 20px/1.3 ui-sans-serif,system-ui;margin:8px 0}
+.shell .compass{right:385px;top:auto;bottom:80px;color:#becbd0;opacity:.7}
+.shell .map-tools{right:380px;bottom:24px;gap:0;overflow:hidden;border:1px solid #ffffff33;border-radius:8px;background:#132b36}
+.shell .map-tools button{background:transparent;border:0;border-radius:0;color:#e2e9e7;min-width:42px;min-height:38px}
+.shell .map-tools button:hover{background:#ffffff18}
+.shell .map-hint{left:20px;bottom:24px;background:#152934c9;border-color:#ffffff26;color:#b5c5c9;border-radius:6px}
+.shell .territory{stroke:#dde3d5;stroke-width:.045;stroke-linejoin:round;transition:filter .15s}
+.shell .territory:hover{stroke:#f4f0d6;stroke-width:.12;filter:brightness(1.15)}
+.shell .territory.selected{stroke:#fff3ce;stroke-width:.08;filter:brightness(1.1)}
+.shell .territory:focus-visible{stroke:#fff;stroke-width:.2;outline:none;filter:brightness(1.25)}
+.shell .maplabel{font-size:.65px;letter-spacing:.015px;font-weight:600;fill:#1d2f36;stroke:#f1eadc88;stroke-width:.06px}
+.shell .map-changed{stroke:#ffde7d;stroke-width:.18}
+.topbar{background:#10252f;border-bottom:1px solid #ffffff17}
+.topbar .brand{font-size:18px;letter-spacing:.08em}.topbar .brand span{display:none}
+.topbar button{border-color:#ffffff2c;border-radius:6px;font-weight:500}.topbar .campaign{color:#9bafb8}
+#notice:empty{display:none}#notice .banner{position:relative;padding:8px 20px;font-size:11px;background:#e3e8e2;border:0}
+body:has(.shell){height:100dvh;overflow:hidden;display:flex;flex-direction:column}
+body:has(.shell) #app{min-height:0;display:flex;flex-direction:column;flex:1}
+body:has(.shell) .shell{min-height:0;flex:1}
+body:has(.shell) .center,body:has(.shell) .map-frame{height:100%;min-height:0}
+body:has(.shell) .topbar{flex-shrink:0}
+@media(min-width:1600px){.shell .rightbar{width:360px}.shell .map-toolbar{right:400px}.shell .map-tools{right:400px}.shell .compass{right:405px}}
+@media(max-width:900px){.shell .rightbar{width:310px;right:12px;top:12px;bottom:12px;padding:0 16px 16px}.shell .map-toolbar{left:12px;top:12px;right:334px;display:block;padding:12px}.shell .map-toolbar>.row{margin-top:10px;gap:6px;flex-wrap:wrap}.shell .date{font-size:18px}.shell .map-hint{display:none}.shell .map-tools{right:334px;bottom:16px}.shell .compass{right:339px}.shell .sidebar,.shell .chronicle{left:12px;top:133px;width:280px}.shell .map-detail{left:12px;top:133px;max-width:220px}}
+@media(max-width:620px){.topbar{height:58px;min-height:58px;flex-wrap:nowrap;padding:8px 10px;gap:10px}.topbar .brand{font-size:14px!important}.topbar .campaign,.topbar [data-auth-action="account"],.topbar [data-action="exit"]{display:none}.topbar>.row{gap:4px}.topbar button{font-size:10px;padding:7px}.topbar [data-action="toggle-campaign"]{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shell .map-toolbar{left:10px;top:10px;right:10px;display:flex;padding:10px 12px;min-height:0;gap:10px}.shell .map-toolbar .eyebrow{font-size:8px;max-width:180px}.shell .map-toolbar>.row{margin:0;justify-content:flex-end}.shell .map-toolbar #map-change-count,.shell .map-toolbar #phase{display:none}.shell .date{font-size:16px}.shell .rightbar{top:auto;bottom:0;left:0;right:0;width:100%;max-height:42%;border-radius:14px 14px 0 0;padding:0 18px 16px}.shell .rightbar .tabs{position:sticky;top:0;padding-top:0;margin-bottom:14px;z-index:2}.shell .rightbar .tabs button{padding:11px 4px}.shell .panel-title{font-size:19px}.shell .rightbar textarea{min-height:84px}.shell .rightbar .ready-box{margin-top:12px}.shell .map-tools{right:12px;bottom:calc(42% + 12px)}.shell .compass{display:none}.shell .map-detail{top:86px;left:10px;max-width:205px;padding:12px}.shell .map-detail strong{font-size:16px}.shell .sidebar,.shell .chronicle{left:10px;right:10px;top:86px;bottom:calc(42% + 10px);width:auto;max-width:none}.shell #map{height:58%}.shell .maplabel{font-size:.75px}}
+@media(min-width:621px){.shell #map{width:calc(100% - 360px)}}
+@media(min-width:1600px){.shell #map{width:calc(100% - 380px)}}
+@media(min-width:621px) and (max-width:900px){.shell #map{width:calc(100% - 334px)}}
+.shell .territory{stroke-width:.035}.shell .maplabel{font-size:.82px;stroke:#f4ecd455;stroke-width:.035px}
+.shell .territory{stroke:var(--territory-fill)}
+.shell .territory:hover,.shell .territory.selected{stroke:#fff3ce}
+.shell .territory:focus-visible{stroke:#fff}
+.shell .territory.map-changed{stroke:#ffde7d}
+.shell #map-country{width:170px;flex-shrink:0;font-size:12px;padding:8px;background:#203c48;color:#e3eceb;border-color:#ffffff28;pointer-events:auto}
+.neutral-land{fill:#acb9bb;stroke:#d4dddb;stroke-width:.1}
+.shell .world-map .territory{stroke-width:.08}.shell .world-map .territory:hover,.shell .world-map .territory.selected{stroke-width:.22}
+@media(max-width:1100px){.shell .map-toolbar #phase,.shell .map-toolbar #map-change-count{display:none}.shell #map-country{width:135px}}
+@media(max-width:900px){.shell #map-country{margin-top:8px;width:100%}}
+@media(max-width:620px){.shell .map-toolbar{flex-wrap:wrap}.shell .map-toolbar>div:first-child{flex:1}.shell .map-toolbar .eyebrow{max-width:none}.shell #map-country{order:3;width:100%;margin-top:0;padding:6px;font-size:11px}.shell .map-detail,.shell .sidebar,.shell .chronicle{top:118px}.shell .map-tools button{min-width:34px;font-size:11px}.shell .map-tools [data-action="map-focus"]{padding:8px}}

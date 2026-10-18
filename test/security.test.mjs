@@ -11,9 +11,9 @@ import { createGameServer } from '../server.mjs';
 import { securityConfig,createIdentityStore,hashPassword,verifyPassword,digest,passwordPolicy,randomToken } from '../security.mjs';
 import { scenario } from '../scenario.mjs';
 const password='Test-only passphrase 42!';
-async function setup(t,{config=securityConfig({}),fetchAI,bootstrap=true}={}){
+async function setup(t,{config=securityConfig({}),fetchAI,bootstrap=true,logger}={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'historia-security-'));let time=Date.now();
- const server=createGameServer({dataDir:dir,config,fetchAI,clock:()=>time});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const server=createGameServer({dataDir:dir,config,fetchAI,logger,clock:()=>time});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(async()=>{if(server.listening)await new Promise(r=>server.close(r));fs.rmSync(dir,{force:true,recursive:true});});
  const base=`http://127.0.0.1:${server.address().port}`,cookies=new Map();
  async function req(route,body,session,headers={},method){const response=await fetch(base+'/api'+route,{method:method||(body?'POST':'GET'),headers:{...(body?{'Content-Type':'application/json',Origin:base}:{}),...(session?{Cookie:session.cookie,'X-CSRF-Token':session.csrf}:{}),...headers},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();if(response.status===202&&data.job){let job=data.job;for(let i=0;job.state==='pending'&&i<300;i++){await new Promise(r=>setTimeout(r,10));const poll=await fetch(base+'/api/jobs/'+job.id,{headers:{Cookie:session.cookie}});const status=await poll.json();if(!poll.ok)return{status:poll.status,data:status};job=status.job;}assert.notEqual(job.state,'pending','AI job did not finish');return job.state==='failed'?{status:job.error.status,data:{error:job.error.message}}:{status:200,data:job.result};}const cookie=response.headers.get('set-cookie')?.split(';')[0];return {status:response.status,data,headers:response.headers,...(cookie?{cookie,csrf:data.csrf}:{})};}
@@ -442,4 +442,21 @@ test('stale browser orders/readiness after nation reassignment are rejected by s
  await f.req('/admin/assign-seat',{id:r.id,username:'playerone',country:'IT'},f.admin);
  for(const [action,body]of [['orders',{orders:[{type:'invest'}]}],['ready',{ready:true}]])assert.equal((await f.req(`/rooms/${r.id}/${action}`,{...body,_seat:before.me},u)).status,409);
  const next=(await f.req(`/rooms/${r.id}`,null,u)).data;assert.equal((await f.req(`/rooms/${r.id}/orders`,{orders:[{type:'invest'}],_seat:next.me},u)).status,200);
+});
+
+test('AI failures reach container diagnostics and user error references without private payloads',async t=>{
+ const logs=[];let failure='policy';
+ const f=await setup(t,{config:securityConfig({OLLAMA_MODEL:'test-model'}),logger:{error:line=>logs.push(JSON.parse(line))},fetchAI:async()=>{
+  if(failure==='network'){const e=new TypeError('fetch failed');e.cause={code:'ECONNREFUSED'};throw e;}
+  if(failure==='timeout')throw new DOMException('PRIVATE_MODEL_OUTPUT','TimeoutError');
+  if(failure==='http')return Response.json({error:"model 'missing' not found"},{status:404});
+  if(failure==='length')return Response.json({done_reason:'length',message:{content:'PRIVATE_MODEL_OUTPUT'}});
+  if(failure==='json')return new Response('PRIVATE_MODEL_OUTPUT',{status:200});
+  return Response.json({message:{content:JSON.stringify({events:[{title:'Rejected',body:'No state change.'}],policies:[{playerId:'FR',orderIndex:0,outcome:'PRIVATE_MODEL_OUTPUT',treasury:0,economy:0,military:0,stability:0}],npcOrders:[],mapChanges:[]})}});
+ }}),r=await f.room();
+ await f.req(`/rooms/${r.id}/orders`,{orders:[{type:'policy',text:'PRIVATE_ORDER_MARKER'}]},f.admin);await f.req(`/rooms/${r.id}/ready`,{ready:true},f.admin);
+ const turn=await f.req(`/rooms/${r.id}/advance`,{},f.admin);assert.equal(turn.status,502);assert.match(turn.data.error,/unknown policy/);assert.match(turn.data.error,/log reference [a-f0-9]{12}/);
+ const state=(await f.req(`/rooms/${r.id}`,null,f.admin)).data;assert.equal(state.round,1);assert.match(state.error,/AI turn failed.*log reference/);assert.equal(state.players[0].orders[0].text,'PRIVATE_ORDER_MARKER');assert.equal(logs.length,1);assert.equal(logs[0].operation,'advance');assert.equal(logs[0].phase,'fullTurn');assert.equal(logs[0].attempt,2);
+ for(const type of['network','timeout','http','length','json']){failure=type;const reply=await f.req(`/rooms/${r.id}/advisor`,{text:'PRIVATE_ADVISOR_MARKER'},f.admin);assert.equal(reply.status,502);const diagnostic=logs.at(-1);assert.equal(diagnostic.event,'ai_failure');assert.equal(diagnostic.operation,'advisor');assert.equal(diagnostic.campaign,r.id);assert.equal(diagnostic.model,'test-model');assert(reply.data.error.includes(diagnostic.reference));if(type==='network')assert.equal(diagnostic.networkCode,'ECONNREFUSED');if(type==='timeout')assert.equal(diagnostic.errorType,'timeout');if(type==='http'){assert.equal(diagnostic.upstreamStatus,404);assert.match(diagnostic.reason,/not found/);}}
+ const all=JSON.stringify(logs);for(const secret of['PRIVATE_ORDER_MARKER','PRIVATE_ADVISOR_MARKER','PRIVATE_MODEL_OUTPUT',f.admin.cookie,f.admin.csrf])assert(!all.includes(secret));assert.equal(logs.length,6);
 });
