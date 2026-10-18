@@ -108,7 +108,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }else{const hostname=new URL('http://'+requestHost).hostname;check(config.insecureLAN||loopback&&['localhost','127.0.0.1','[::1]'].includes(hostname),'Network access requires HTTPS and PUBLIC_ORIGIN. Development HTTP is limited to loopback.',403);}
    if(parts[0]!=='api'){
     check(req.method==='GET','Method not allowed.',405);
-    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/map-view.js':'map-view.js','/style.css':'style.css'}[url.pathname];check(file,'Not found.',404);
+    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/map-view.js':'map-view.js','/game-layout.js':'game-layout.js','/game.css':'game.css','/style.css':'style.css'}[url.pathname];check(file,'Not found.',404);
     res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(fs.readFileSync(path.join(root,'public',file)));return;
    }
    if(req.method==='GET'&&url.pathname==='/api/health'){reply(res,200,{ok:true});return;}
@@ -270,7 +270,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
     if(to!=='all'&&!human){
      return launch(res,account,r,p,req,b,async()=>{
      const sentRound=r.round,sentRevision=r.revision||0;
-     const answer=await call(r,()=>[{role:'system',content:systemPrompt(r,'diplomacy',r.world.countries.find(c=>c.id===to))},{role:'user',content:JSON.stringify({...context(r,p),conversation:r.messages.filter(m=>m.audience?.includes(account.user.id)&&((m.from===p.country&&m.to===to)||(m.to===p.country&&m.from===to))),message})}],undefined,account.user.id,()=>{check(auth(rooms.get(r.id),requireAccount(req)).id===p.id,'Your government seat changed. Please retry.',409);check(!rooms.get(r.id).players.some(x=>x.country===to),'This nation now has a human government. Send the message again.',409);});
+     const answer=await call(r,()=>[{role:'system',content:systemPrompt(r,'diplomacy',r.world.countries.find(c=>c.id===to))},{role:'user',content:JSON.stringify({...context(r,p),addressedCountry:{id:to,name:r.world.countries.find(c=>c.id===to).name},conversation:r.messages.filter(m=>m.audience?.includes(account.user.id)&&((m.from===p.country&&m.to===to)||(m.to===p.country&&m.from===to))),message})}],undefined,account.user.id,()=>{check(auth(rooms.get(r.id),requireAccount(req)).id===p.id,'Your government seat changed. Please retry.',409);check(!rooms.get(r.id).players.some(x=>x.country===to),'This nation now has a human government. Send the message again.',409);});
      // Resolution may have begun while awaiting AI. Do not inject stale dialogue.
      r=rooms.get(r.id);planning(r);const fresh=requireAccount(req);const current=auth(r,fresh);check(current.id===p.id,'Your government seat changed. Send this message again.',409);check((r.revision||0)===sentRevision&&r.round===sentRound&&!r.players.some(x=>x.country===to),'The world or recipient changed. Send this message again.',409);
      r.messages.push({id:token().slice(0,12),audience:[account.user.id],from:p.country,to,text:message,round:r.round,date:r.world.date},{id:token().slice(0,12),audience:[account.user.id],from:to,to:p.country,text:answer.slice(0,8000),round:r.round,date:r.world.date});
