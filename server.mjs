@@ -61,26 +61,35 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
   check(config.endpoints.includes(r.endpoint),'This AI endpoint is not approved by the server administrator.',403);
   const revision=r.revision||0,round=r.round,phase=r.phase,endpoint=r.endpoint,model=r.model;
   authorize();const current=rooms.get(r.id);check(current&&!current.closed&&(current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Please retry.',409);
-  const resolved=typeof messages==='function'?messages():messages;
+  let resolved=typeof messages==='function'?messages():messages;
   const outputBase=format?config.aiTurnOutput:config.aiChatOutput,outputCeiling=format?8192:4096;
-  let outputTokens=outputBase,lastResult,attempts=0,lastOutputUsed=outputBase,noRoom=false;
-  for(let attempt=1;attempt<=2;attempt++){
+  let outputTokens=outputBase,lastResult,attempts=0,lastOutputUsed=outputBase,noRoom=false,toolRetried=false,outputRetried=false;
+  for(let attempt=1;attempt<=3;attempt++){
    let packed;
    try{packed=compactRequest({room:current,messages:resolved,format,contextLength:config.aiContext,outputTokens});}
    catch(e){if(!lastResult||e.status!==413)throw e;noRoom=true;break;}
    let lastHeartbeat=0;
    attempts++;lastOutputUsed=outputTokens;
-   const result=await readOllama({fetchAI,url:endpoint+'/api/chat',payload:{model,messages:packed.messages,...(defaultThinking(model,config.aiThink)!==undefined?{think:defaultThinking(model,config.aiThink)}:{}),...(format?{format}:{}),options:{temperature:format?0.35:0.65,num_ctx:config.aiContext,num_batch:config.aiBatch,num_predict:packed.outputTokens},keep_alive:config.aiKeepAlive},idleMs:config.aiTimeout,loadMs:config.aiLoadTimeout,maxDurationMs:config.aiMaxDuration,onProgress:state=>{aiProgress.getStore()?.({...state,attempt,outputLimit:outputTokens});if(state.elapsedMs-lastHeartbeat>=15000){lastHeartbeat=state.elapsedMs;logger.info?.(JSON.stringify({event:'ai_progress',campaign:r.id,round:r.round,model,attempt,...state}));}}});
+   let result;
+   try{result=await readOllama({fetchAI,url:endpoint+'/api/chat',payload:{model,messages:packed.messages,...(defaultThinking(model,config.aiThink)!==undefined?{think:defaultThinking(model,config.aiThink)}:{}),...(format?{format}:{}),options:{temperature:format?0.35:0.65,num_ctx:config.aiContext,num_batch:config.aiBatch,num_predict:packed.outputTokens},keep_alive:config.aiKeepAlive},idleMs:config.aiTimeout,loadMs:config.aiLoadTimeout,maxDurationMs:config.aiMaxDuration,onProgress:state=>{aiProgress.getStore()?.({...state,attempt,outputLimit:outputTokens});if(state.elapsedMs-lastHeartbeat>=15000){lastHeartbeat=state.elapsedMs;logger.info?.(JSON.stringify({event:'ai_progress',campaign:r.id,round:r.round,model,attempt,...state}));}}});}
+   catch(error){
+    if(error.failureType!=='unexpected_tool_call'||toolRetried)throw error;
+    toolRetried=true;
+    logger.warn?.(JSON.stringify({event:'ai_tool_retry',campaign:r.id,round:r.round,model,attempt,toolCallCount:error.generation?.toolCallCount||0}));
+    resolved=resolved.map((message,index)=>index===0?{...message,content:message.content+'\nRESPONSE TRANSPORT: No tools are available. Do not emit tool calls or function calls. Return '+(format?'only the JSON object matching the supplied response schema.':'your answer directly as plain text.')}:message);
+    continue;
+   }
    logger.info?.(JSON.stringify({event:'ai_generation',campaign:r.id,round:r.round,model,attempt,doneReason:result.doneReason||null,elapsedMs:result.elapsedMs,loadDurationMs:result.loadDurationMs,evalCount:result.evalCount,thinkingCharacters:result.thinkingCharacters,answerCharacters:result.answerCharacters,outputLimit:outputTokens}));
    if(result.doneReason!=='length'){
     check(result.content,'Ollama returned no answer. Try disabling thinking for this model or choose another model.',502);return result.content;
    }
    lastResult=result;
-   if(attempt===2||outputTokens>=outputCeiling)break;
+   if(outputRetried||outputTokens>=outputCeiling)break;
+   outputRetried=true;
    outputTokens=Math.min(outputCeiling,outputTokens*2);
    logger.warn?.(JSON.stringify({event:'ai_output_retry',campaign:r.id,round:r.round,model,outputLimit:outputTokens,thinkingCharacters:result.thinkingCharacters}));
   }
-  const failure=new GameError(`AI reached its output limit${attempts>1?' after one larger-budget retry':''} (${lastOutputUsed} tokens).${noRoom?' The current context cannot fit a larger response.':''} No game changes were applied.${lastResult?.thinkingCharacters?' The model spent output on thinking; set AI_THINK=off for a model that supports it.':''} See container logs for generation counts and timing.`,502);failure.failureType='output_limit';failure.generation={elapsedMs:lastResult?.elapsedMs,answerCharacters:lastResult?.answerCharacters,thinkingCharacters:lastResult?.thinkingCharacters,outputLimit:lastOutputUsed,attempts};throw failure;
+  const failure=new GameError(`AI reached its output limit${outputRetried?' after one larger-budget retry':''} (${lastOutputUsed} tokens).${noRoom?' The current context cannot fit a larger response.':''} No game changes were applied.${lastResult?.thinkingCharacters?' The model spent output on thinking; set AI_THINK=off for a model that supports it.':''} See container logs for generation counts and timing.`,502);failure.failureType='output_limit';failure.generation={elapsedMs:lastResult?.elapsedMs,answerCharacters:lastResult?.answerCharacters,thinkingCharacters:lastResult?.thinkingCharacters,outputLimit:lastOutputUsed,attempts};throw failure;
  }
  function context(r,p){return worldContext(r,p,p?nearbyCountries(r.world,p.country):[]);}
  async function adjudicate(r,userId,authorize){

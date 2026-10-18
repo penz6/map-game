@@ -7,12 +7,13 @@ export function geometryFingerprint(polygons){
 }
 const regionCoordinates=(r,meshes)=>{const source=r.polygons||[[r.points]],mesh=meshes?.get(r.id);return mesh&&mesh.properties.sourceHash===geometryFingerprint(source)?mesh.geometry.coordinates:source;};
 export function atlasRegions(world,meshes){return featureCollection(world.regions.map(r=>({type:'Feature',id:r.id,properties:{id:r.id,name:r.name,owner:r.owner,color:world.countries.find(c=>c.id===r.owner)?.color||'#b8b5a1'},geometry:{type:'MultiPolygon',coordinates:closed(regionCoordinates(r,meshes))}})));}
+const nationPaint=color=>/^#[a-f0-9]{6}$/i.test(color)?'#'+color.slice(1).match(/../g).map(channel=>Math.round(parseInt(channel,16)*.8).toString(16).padStart(2,'0')).join(''):color;
 export function atlasCountries(world,union,meshes){
  return featureCollection(world.countries.flatMap(c=>{
   const polygons=world.regions.filter(r=>r.owner===c.id).flatMap(r=>regionCoordinates(r,meshes));if(!polygons.length)return [];
   let coordinates=polygons;
   try{coordinates=union(...polygons.map(p=>[p]));}catch{ /* Invalid custom topology retains selectable land; borders still follow original outlines. */ }
-  return [{type:'Feature',id:c.id,properties:{id:c.id,name:c.name,color:c.color,land:world.regions.filter(r=>r.owner===c.id).length},geometry:{type:'MultiPolygon',coordinates:closed(coordinates)}}];
+  return [{type:'Feature',id:c.id,properties:{id:c.id,name:c.name,color:c.color,mapColor:nationPaint(c.color),land:world.regions.filter(r=>r.owner===c.id).length},geometry:{type:'MultiPolygon',coordinates:closed(coordinates)}}];
  }));
 }
 export function homeBounds(world,id){

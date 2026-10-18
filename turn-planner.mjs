@@ -74,7 +74,7 @@ export function assertWorldFits(room,profile){
 async function generate(room,system,input,format,validate,request){
  let rejection='';
  for(let attempt=0;attempt<2;attempt++){
-  const messages=formatMessages(system,{...input,...(rejection?{repairInstruction:'Rejected proposal: '+bytesClip(rejection,240)+'. Return a complete corrected response for this phase. Copy playerId and zero-based orderIndex exactly from policyReferences or policyBatch; return no policy results when that list is empty.'}:{})});
+  const messages=formatMessages(system,{...input,...(rejection?{repairInstruction:'Rejected proposal: '+bytesClip(rejection,240)+'. Return a complete corrected response for this phase. For mapChanges use type and country on every item; transfer/merge also require targetCountry. Copy nation IDs from the current world and province IDs from territories; do not guess missing IDs. Copy playerId and zero-based orderIndex exactly from policyReferences or policyBatch; return no policy results when that list is empty.'}:{})});
   const raw=await request(messages,format);
   try{return validate(JSON.parse(raw));}
    catch(error){error.aiPhase=input.phase||'fullTurn';error.aiAttempt=attempt+1;if(attempt===1){if(error instanceof SyntaxError){const failure=new GameError('AI returned malformed JSON twice. No changes were applied.',502);failure.aiPhase=error.aiPhase;failure.aiAttempt=2;throw failure;}throw error;}rejection=error instanceof SyntaxError?'Malformed JSON':error.message;}
