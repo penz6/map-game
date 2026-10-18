@@ -5,8 +5,21 @@ import path from 'node:path';
 import { createIdentityStore, securityConfig } from './security.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url)),dir=process.env.DATA_DIR||path.join(root,'data');
 let muted=false;const out=new Writable({write(chunk,encoding,done){if(!muted)process.stdout.write(chunk,encoding);done();}});
+out.isTTY=!!process.stdout.isTTY;out.columns=process.stdout.columns;
 const input=createInterface({input:process.stdin,output:out,terminal:!!process.stdin.isTTY});
-const question=async(label,secret=false)=>{process.stdout.write(label);muted=secret;try{return await input.question('');}finally{muted=false;if(secret)process.stdout.write('\n');}};
+const resize=()=>{out.columns=process.stdout.columns;out.emit('resize');};
+process.stdout.on('resize',resize);
+const question=async(label,secret=false)=>{
+ const controller=new AbortController(),closed=()=>controller.abort();
+ input.once('close',closed);
+ try{
+  // Let readline own the real prompt so editing/redraw cannot erase a label
+  // written outside it. Render the prompt before suppressing password echo.
+  const answer=input.question(label,{signal:controller.signal});muted=secret;
+  return await answer;
+ }catch(e){if(e.name==='AbortError')throw new Error('Input closed. Run this command in an interactive container terminal.');throw e;}
+ finally{input.removeListener('close',closed);muted=false;if(secret)process.stdout.write('\n');}
+};
 const newPassword=async()=>{const a=await question('New password/passphrase (15–128 characters; hidden): ',true),b=await question('Confirm password (hidden): ',true);if(a!==b)throw new Error('Passwords do not match.');return a;};
 let store;
 try{
@@ -17,4 +30,4 @@ try{
   await store.createAdmin(name,display,password);console.log('Administrator created. Sign in using your username and password.');
  }else if(command==='reset-password'){await store.resetPassword(process.argv[3],await newPassword());console.log('Password changed. All account sessions were revoked.');}
 
-}catch(e){console.error(e.message);process.exitCode=1;}finally{input.close();store?.close();}
+}catch(e){console.error(e.message);process.exitCode=1;}finally{process.stdout.removeListener('resize',resize);input.close();store?.close();}
