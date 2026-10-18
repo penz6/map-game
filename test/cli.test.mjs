@@ -8,3 +8,12 @@ test('production console password recovery works without MFA secrets',async t=>{
  const code=await new Promise((resolve,reject)=>{child.on('exit',resolve);child.on('error',reject);const timeout=setTimeout(()=>{child.kill();reject(new Error('Console recovery timeout'));},10000);child.on('close',()=>clearTimeout(timeout));});assert.equal(code,0,error);assert(!output.includes(replacement));
  store=createIdentityStore(dir,{production:true});try{assert(await verifyPassword(replacement,store.findUser(admin.user.id).password_hash));assert(!('mfa' in store.publicUser(store.findUser(admin.user.id))));}finally{store.close();}
 });
+
+// Unlike pipe-only tests, a PTY exercises readline's ANSI editing/redraw path.
+for(const mode of ['create','cancel'])test(`interactive admin terminal ${mode}: prompts survive editing and passwords stay hidden`,{skip:process.platform!=='linux'},async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'historia-cli-pty-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
+ const result=await promisify(execFile)('python3',[fileURLToPath(new URL('./cli-pty.py',import.meta.url)),process.execPath,fileURLToPath(new URL('../manage.mjs',import.meta.url)),dir,mode],{timeout:20000});
+ assert.match(result.stdout,/passed/);
+ if(mode==='create'){const store=createIdentityStore(dir);try{const user=store.db.prepare('SELECT * FROM users WHERE username=?').get('ptyadmin');assert.equal(user.role,'admin');assert(await verifyPassword('Only a disposable terminal test password 538',user.password_hash));}finally{store.close();}}
+});
