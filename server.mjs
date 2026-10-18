@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {reportAIFailure} from './ai-diagnostics.mjs';
 import {assignCampaignSeat} from './campaign-admin.mjs';
 import {assessVictory} from './victory.mjs';
 import { createAIQueue } from './ai-queue.mjs';
@@ -20,7 +21,7 @@ import { check, GameError, validateOrders, turnSchema, directorTurnSchema, valid
 const root=path.dirname(fileURLToPath(import.meta.url));
 const token=()=>randomBytes(24).toString('hex');
 const text=(x,max,label='Text')=>{check(typeof x==='string'&&x.trim().length>0&&x.length<=max,`${label} must contain 1–${max} characters.`);return x.trim();};
-export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'data'),fetchAI=fetch,config=securityConfig(),clock=Date.now}={}){
+export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'data'),fetchAI=fetch,config=securityConfig(),clock=Date.now,logger=console}={}){
  fs.mkdirSync(dataDir,{recursive:true,mode:0o700});
  const identity=createIdentityStore(dataDir,{now:clock});
  const lockFile=path.join(dataDir,'server.lock');
@@ -47,6 +48,11 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const aiQueue=createAIQueue({concurrency:config.aiConcurrency}),jobs=createAIJobs({clock,maxActive:config.aiConcurrency+32});
  async function readAIJSON(response){const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;check(size<=1024*1024,'AI response exceeded the allowed size.',502);chunks.push(Buffer.from(chunk));}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new GameError('AI returned an invalid response.',502);}}
  async function call(r,messages,format,userId,authorize=()=>{}){
+  let phase='request';
+  try{const resolved=typeof messages==='function'?messages():messages;const input=JSON.parse(resolved[1].content);phase=input.phase||(format?'fullTurn':'conversation');return await callModel(r,resolved,format,userId,authorize);}
+  catch(error){error.aiPhase=phase;throw error;}
+ }
+ async function callModel(r,messages,format,userId,authorize=()=>{}){
   check(r.model,'Set your Ollama model in Host settings first.');
   check(config.endpoints.includes(r.endpoint),'This AI endpoint is not approved by the server administrator.',403);
   const revision=r.revision||0,round=r.round,phase=r.phase,endpoint=r.endpoint,model=r.model;
@@ -54,8 +60,11 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
   const packed=compactRequest({room:current,messages:typeof messages==='function'?messages():messages,format,contextLength:config.aiContext,outputTokens:format?config.aiTurnOutput:config.aiChatOutput});
   let response;
   try{response=await fetchAI(endpoint+'/api/chat',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,messages:packed.messages,stream:false,...(config.aiThink!==undefined?{think:config.aiThink}:{}),...(format?{format}:{}),options:{temperature:format?0.35:0.65,num_ctx:config.aiContext,num_batch:config.aiBatch,num_predict:packed.outputTokens},keep_alive:config.aiKeepAlive}),signal:AbortSignal.timeout(config.aiTimeout)});}
-  catch(e){throw new GameError(`The configured Ollama service could not be reached. Ask the host to check its connection. ${e.name==='TimeoutError'?`The ${config.aiTimeout/1000}-second request timed out.`:''}`,502);}
-  check(response.ok,`Ollama returned HTTP ${response.status}. Check the model name and server logs.`,502);
+  catch(e){const failure=new GameError(e.name==='TimeoutError'?`Ollama timed out after ${config.aiTimeout/1000} seconds. Check model load and server capacity.`:'The configured Ollama service could not be reached. Ask the host to check its connection.',502);failure.failureType=e.name==='TimeoutError'?'timeout':'connection';failure.networkCode=e.cause?.code||e.code;throw failure;}
+  if(!response.ok){
+   let reason='';try{const payload=await readAIJSON(response),message=String(payload.error||'');reason=/not found/i.test(message)?'Model or endpoint not found':/out of memory|unable to allocate|insufficient.*memory/i.test(message)?'Insufficient model memory':/load.*model|model.*load/i.test(message)?'Model failed to load':/does not support|unsupported/i.test(message)?'Unsupported model capability':'';}catch{}
+   const failure=new GameError(`Ollama returned HTTP ${response.status}.${reason?' '+reason+'.':''} Check the model name and server logs.`,502);failure.failureType='upstream_http';failure.upstreamStatus=response.status;throw failure;
+  }
   const body=await readAIJSON(response);
   check(body.done_reason!=='length','AI reached its output limit. No game changes were applied. Shorten policies or raise AI_TURN_OUTPUT_TOKENS/AI_CHAT_OUTPUT_TOKENS while keeping enough context headroom.',502);
   check(typeof body.message?.content==='string'&&body.message.content.trim(),'Ollama returned no answer. Try a larger output budget or another model.',502);
@@ -81,7 +90,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    let release;
    try{release=await aiQueue.acquire(account.user.id);const current=rooms.get(r.id);const fresh=requireAccount(req);check(current,'Campaign unavailable.',410);if(p.id==='@admin')requireAdmin(fresh);else check(auth(current,fresh).id===p.id,'Your government seat changed. Retry.',409);check((current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Retry.',409);
     return await work();
-   }catch(e){if(req.url.endsWith('/advance')&&rooms.get(r.id)===r&&r.phase==='resolving'&&r.round===round&&(r.revision||0)===revision){r.phase='planning';r.error=e.message;save(r);}throw e;}
+   }catch(e){reportAIFailure(e,{operation:req.url.split('/').at(-1),room:r},logger);if(req.url.endsWith('/advance')&&rooms.get(r.id)===r&&r.phase==='resolving'&&r.round===round&&(r.revision||0)===revision){r.phase='planning';r.error=`AI turn failed: ${e.message} (log reference ${e.diagnosticReference}). Saved orders are intact.`;save(r);}else if(req.url.endsWith('/advance')&&rooms.get(r.id)===r){r.error=`AI turn failed: ${e.message} (log reference ${e.diagnosticReference}). Saved orders are intact.`;save(r);}throw e;}
    finally{release?.();}
   }});reply(res,202,{job:jobs.view(job)});
  };
@@ -99,7 +108,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }else{const hostname=new URL('http://'+requestHost).hostname;check(config.insecureLAN||loopback&&['localhost','127.0.0.1','[::1]'].includes(hostname),'Network access requires HTTPS and PUBLIC_ORIGIN. Development HTTP is limited to loopback.',403);}
    if(parts[0]!=='api'){
     check(req.method==='GET','Method not allowed.',405);
-    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/style.css':'style.css'}[url.pathname];check(file,'Not found.',404);
+    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/map-view.js':'map-view.js','/style.css':'style.css'}[url.pathname];check(file,'Not found.',404);
     res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(fs.readFileSync(path.join(root,'public',file)));return;
    }
    if(req.method==='GET'&&url.pathname==='/api/health'){reply(res,200,{ok:true});return;}
@@ -279,7 +288,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }
    else throw new GameError('Not found.',404);
    reply(res,200,view(r,r.players.find(x=>x.id===p.id)));
-  }catch(e){if(!res.headersSent)reply(res,e.status||500,{error:e.status?e.message:'Unexpected server error. See the host terminal.'});else res.end();if(!e.status)console.error(e);}
+  }catch(e){if(req.url.split('/').at(-1)==='models'&&(e.status||500)>=500){const room=rooms.get(req.url.split('/')[3]);if(room)reportAIFailure(e,{operation:'models',room},logger);}if(!res.headersSent)reply(res,e.status||500,{error:e.status?e.message:'Unexpected server error. See the host terminal.'});else res.end();if(!e.status)console.error(e);}
  };
  const server=config.tlsCert&&config.tlsKey?https.createServer({cert:fs.readFileSync(config.tlsCert),key:fs.readFileSync(config.tlsKey)},handler):http.createServer(handler);
  server.requestTimeout=15000;server.headersTimeout=10000;server.keepAliveTimeout=5000;server.maxHeadersCount=40;

@@ -48,7 +48,7 @@ Compaction is lossy. Incidental events, old promises or nuance may be omitted. C
 - Read the full submitted policy texts in batches of up to six, sized by the actual budget. Each batch sees all ownership/identity information and the issuing governments' exact resources, units, routes and other orders. It cannot issue commands for another human government.
 - Policies retain their original playerId/orderIndex. Results are validated together with earlier policy actions, including budget and repeated-unit constraints.
 - If an individual text plus necessary state still cannot fit (for example, heavily escaped text), first send its complete text in a small intent-compression request. The subsequent policy pass uses the explicitly labeled summary. The original is never silently cut or replaced in the save.
-- Supply a bounded intent summary for **every** policy to one final world-resolution pass. These summaries are explicitly lossy (up to 320 UTF-8 bytes per intent at 32K; 80 in smaller windows); that pass does not re-adjudicate policies. It chooses the final map changes/NPC diplomatic responses or Strategy NPC orders.
+- Supply a bounded intent summary for **every** policy to one final world-resolution pass. These summaries are explicitly lossy (up to 320 UTF-8 bytes per intent at 32K, reduced uniformly to 160 or 80 when a larger world needs the space; 80 in smaller windows); that pass does not re-adjudicate policies. It chooses the final map changes/NPC diplomatic responses or Strategy NPC orders.
 - Compact the final Strategy graph losslessly into undirected row-index pairs, and omit display-only army names while retaining unit IDs/owners/positions/strength. Output actions still require stable IDs. Full original state stays in the game.
 - Validate the entire combined result and future world's capacity, then commit once. No intermediate policy result changes the shared map, treasury, date or order list. Any failed phase leaves the turn unchanged.
 
@@ -56,16 +56,16 @@ The one world director remains responsible for the final map; batching does not 
 
 ## Reproducible 32K stress measurements
 
-Run node scripts/context-report.mjs. It uses controlled valid responses, not a live model. Every number below includes input byte-bound, output reserve and framing headroom. Calls can vary with real responses, requested extra actions, custom prompts and history.
+Run node scripts/context-report.mjs. The current fixture is the full 47-government, 122-region world. It uses controlled valid responses, not a live model. Every number below includes input byte-bound, output reserve and framing headroom. Calls can vary with real responses, requested extra actions, custom prompts and history.
 
-| Starting map workload | Wild Map calls / peak bound | Strategy calls / peak bound |
+| Global map workload | Wild Map calls / peak bound | Strategy calls / peak bound |
 | --- | ---: | ---: |
-| 2 players, no policies | 1 / 18,576 | 1 / 18,351 |
-| 2 players, one short policy each | 1 / 18,830 | 1 / 18,605 |
-| 12 players, one 300-character policy each | 1 / 22,992 | 1 / 22,777 |
-| 12 players, three 300-character policies each | 1 / 30,864 | 1 / 30,649 |
-| 12 players, three maximum-length ASCII policies each | 7 / 26,530 | 7 / 26,560 |
-| 12 players, three maximum-length multibyte policies each | 13 / 32,170 | 13 / 32,099 |
+| 2 players, no policies | 1 / 22,953 | 1 / 24,189 |
+| 2 players, one short policy each | 1 / 23,468 | 1 / 24,704 |
+| 12 players, one 300-character policy each | 1 / 28,896 | 1 / 30,142 |
+| 12 players, three 300-character policies each | 7 / 27,008 | 7 / 24,328 |
+| 12 players, three maximum-length ASCII policies each | 7 / 30,033 | 7 / 28,185 |
+| 12 players, three maximum-length multibyte policies each | 19 / 29,481 | 19 / 27,641 |
 
 All remain below 32,768 without dropping a player's policy. The multibyte fixture uses 2,000 three-byte characters per policy. These are app budget measurements, not actual Qwen token counts, real-model agreement quality, throughput or exact VRAM totals.
 
@@ -84,3 +84,8 @@ The final director receives recent completed NPC negotiations from current human
 Both single-call and staged world resolution use the same fixed director contract. Wild Map permits 1–8 operations with a required net ownership change. Temporary references let a newly created state receive land from other countries and a regime in the same settlement. All operations validate sequential ownership and commit atomically; human identity/last-province protections still apply. See MAP-DIRECTOR.md.
 
 A 32K window increases KV-cache memory compared with 20K. Keep a single generation and the existing Q4 7B starting model; optional q8_0 KV cache depends on your working AMD backend. Full GPU residency and speed at 32K have not been measured on the RX 6750 XT. Smaller AI_CONTEXT_LENGTH values remain available if required, with more staging or scenario-capacity rejection.
+
+
+## Failure diagnostics
+
+Expected AI failures are now logged too, including validation errors such as unknown policy references. Each failed AI job emits an `ai_failure` JSON record to stderr and returns the same log reference to its caller. A failed turn retains its orders and shows the reference in its persistent error banner; failed diplomacy and advisor requests show an inline error. Use `docker compose logs -f app` and match the reference. Logs include the model, operation, world-resolution phase, correction attempt, upstream HTTP status or network error code and failure reason. They omit request bodies, policies, private messages and raw model output. See DOCKER.md for details.

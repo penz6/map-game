@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {scenario,upgradeDefaultGeography} from '../scenario.mjs';
+import {europeScenario as scenario,upgradeDefaultGeography} from '../scenario.mjs';
 import {validateScenario} from '../scenario-editor.mjs';
 const legacy=JSON.parse(fs.readFileSync(new URL('./fixtures/legacy-default-map.json',import.meta.url),'utf8'));
 test('geographic scenarios retain selectable islands and geometry through export/import',()=>{

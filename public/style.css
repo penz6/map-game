@@ -77,3 +77,9 @@ body:has(.shell) .topbar{flex-shrink:0}
 .shell .territory:hover,.shell .territory.selected{stroke:#fff3ce}
 .shell .territory:focus-visible{stroke:#fff}
 .shell .territory.map-changed{stroke:#ffde7d}
+.shell #map-country{width:170px;flex-shrink:0;font-size:12px;padding:8px;background:#203c48;color:#e3eceb;border-color:#ffffff28;pointer-events:auto}
+.neutral-land{fill:#acb9bb;stroke:#d4dddb;stroke-width:.1}
+.shell .world-map .territory{stroke-width:.08}.shell .world-map .territory:hover,.shell .world-map .territory.selected{stroke-width:.22}
+@media(max-width:1100px){.shell .map-toolbar #phase,.shell .map-toolbar #map-change-count{display:none}.shell #map-country{width:135px}}
+@media(max-width:900px){.shell #map-country{margin-top:8px;width:100%}}
+@media(max-width:620px){.shell .map-toolbar{flex-wrap:wrap}.shell .map-toolbar>div:first-child{flex:1}.shell .map-toolbar .eyebrow{max-width:none}.shell #map-country{order:3;width:100%;margin-top:0;padding:6px;font-size:11px}.shell .map-detail,.shell .sidebar,.shell .chronicle{top:118px}.shell .map-tools button{min-width:34px;font-size:11px}.shell .map-tools [data-action="map-focus"]{padding:8px}}

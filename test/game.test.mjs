@@ -180,7 +180,7 @@ test('nearby nations follow current territory ownership and invited lobbies expo
  const f=await fixture(t);
  const signup=await f.req('/auth/register',{username:'newcomer',name:'Newcomer',password:f.password});assert.equal(signup.status,200);
  assert.equal((await f.req(f.route('lobby'),{invite:'bad'},signup.cookie)).status,403);
- const lobby=await f.req(f.route('lobby'),{invite:f.joinInvite},signup.cookie);assert.equal(lobby.status,200);assert.equal(lobby.body.countries.length,28);
+ const lobby=await f.req(f.route('lobby'),{invite:f.joinInvite},signup.cookie);assert.equal(lobby.status,200);assert.equal(lobby.body.countries.length,scenario().countries.length);
  assert.equal(lobby.body.countries.find(c=>c.id==='FR').available,false);assert.equal(lobby.body.countries.find(c=>c.id==='DE').available,false);assert.equal(lobby.body.countries.find(c=>c.id==='IT').available,true);
  assert.deepEqual(Object.keys(lobby.body).sort(),['countries','date','map']);
  assert.equal((await f.req(f.route('join'),{invite:f.joinInvite,country:'FR'},signup.cookie)).status,409);

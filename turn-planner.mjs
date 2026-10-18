@@ -77,7 +77,7 @@ async function generate(room,system,input,format,validate,request){
   const messages=formatMessages(system,{...input,...(rejection?{repairInstruction:'Rejected proposal: '+bytesClip(rejection,240)+'. Return a complete corrected response for this phase. Copy playerId and zero-based orderIndex exactly from policyReferences or policyBatch; return no policy results when that list is empty.'}:{})});
   const raw=await request(messages,format);
   try{return validate(JSON.parse(raw));}
-   catch(error){if(attempt===1)throw error instanceof SyntaxError?new GameError('AI returned malformed JSON twice. No changes were applied.',502):error;rejection=error instanceof SyntaxError?'Malformed JSON':error.message;}
+   catch(error){error.aiPhase=input.phase||'fullTurn';error.aiAttempt=attempt+1;if(attempt===1){if(error instanceof SyntaxError){const failure=new GameError('AI returned malformed JSON twice. No changes were applied.',502);failure.aiPhase=error.aiPhase;failure.aiAttempt=2;throw failure;}throw error;}rejection=error instanceof SyntaxError?'Malformed JSON':error.message;}
  }
 }
 export async function adjudicateBoundedTurn(room,{contextLength,outputTokens,request}){
@@ -89,9 +89,14 @@ export async function adjudicateBoundedTurn(room,{contextLength,outputTokens,req
  const pending=room.players.flatMap(p=>p.orders.flatMap((o,i)=>o.type==='policy'?[{playerId:p.id,country:p.country,orderIndex:i,text:o.text}]:[]));
  const policyFormat=policyResponseSchema(room),policySystem=stageSystem(room,'policyBatch'),policies=[],intents=[];
  // Ensure the final world pass will fit before spending model time on policies.
- const intentBytes=contextLength>=32768?320:80;
- const projected=pending.map(p=>({...p,intent:'x'.repeat(intentBytes)}));
- check(fits(room,formatMessages(stageSystem(room,'worldResolution'),finalInput(room,projected,[],intentBytes)),worldResponseSchema(room),profile),'World plus policy summaries exceeds the 32,768-token ceiling. Simplify the scenario or shorten the prompt/premise.',413);
+ let intentBytes;
+ // A larger world leaves less space for intent summaries. Preserve every policy
+ // and shorten all summaries uniformly before rejecting an otherwise valid map.
+ for(const limit of contextLength>=32768?[320,160,80]:[80]){
+  const projected=pending.map(p=>({...p,intent:'x'.repeat(limit)}));
+  if(fits(room,formatMessages(stageSystem(room,'worldResolution'),finalInput(room,projected,[],limit)),worldResponseSchema(room),profile)){intentBytes=limit;break;}
+ }
+ check(intentBytes,'World plus policy summaries exceeds the 32,768-token ceiling. Simplify the scenario or shorten the prompt/premise.',413);
  while(pending.length){
   const batch=[];
   while(pending.length&&batch.length<6){const candidate=[...batch,pending[0]];if(!fits(room,formatMessages(policySystem,policyInput(room,candidate,policies)),bindPolicyReferences(policyFormat,candidate),profile))break;batch.push(pending.shift());}

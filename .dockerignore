@@ -34,3 +34,6 @@
 !data-maps/**
 !scripts/
 !scripts/build-geography.py
+
+!ai-diagnostics.mjs
+!scripts/build-world.py

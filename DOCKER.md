@@ -79,3 +79,15 @@ docker compose exec app node manage.mjs reset-password USERNAME
 This pre-deployment ruleset does not migrate older prototype saves. Start with a fresh data location. Keep secrets out of the image; `.dockerignore` permits only runtime source files. App-only memory limit is 512 MiB; Ollama requires its own independent resources.
 
 Version 3.7 uses open registration and password-only administrators. No MFA key, initialization script or Docker secret mount is required. Create every admin from the console; public registrations cannot select the admin role. Campaign links are reusable for seven days and preserve the destination through signup. Admin campaign management supports mid-game assignment and private victory criteria. See README.md.
+
+## AI failure diagnostics
+
+AI job failures now emit a single JSON `ai_failure` record to the container's stderr, including known validation failures that previously produced no log. Inspect them with:
+
+```sh
+docker compose logs -f app
+```
+
+The in-game error includes a 12-character log reference matching the record's `reference`. Records identify the operation (`advance`, `chat`, `advisor`, etc.), campaign, round, model, endpoint origin, planning phase, correction attempt, HTTP status or network code, reason and stack frames. This distinguishes a bad policy reference from a missing model, timeout, connection refusal, malformed response or output limit. A failed world turn leaves saved orders intact.
+
+Prompts, orders, private conversations, raw model output, authentication cookies and request bodies are not logged. Ollama's own service logs may provide additional GPU/model-loading details; they are separate from the game container's logs.

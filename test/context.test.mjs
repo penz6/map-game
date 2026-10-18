@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compactRequest, worldContext, requestTokenBound, campaignMemory } from '../context.mjs';
-import { scenario } from '../scenario.mjs';
+import { europeScenario as scenario } from '../scenario.mjs';
 import { turnSchema } from '../engine.mjs';
 import { systemPrompt } from '../prompts.mjs';
 const makeRoom = () => ({ world: {...scenario(),mapMode:'strategy'}, round: 1, history: [] });

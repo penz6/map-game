@@ -1,5 +1,5 @@
 import{test}from'node:test';import assert from'node:assert/strict';
-import{scenario}from'../scenario.mjs';import{validateOrders,validateAI,resolveTurn}from'../engine.mjs';
+import{europeScenario as scenario}from'../scenario.mjs';import{validateOrders,validateAI,resolveTurn}from'../engine.mjs';
 const noAI={events:[{title:'World affairs',body:'Governments consider their next steps.'}],policies:[],npcOrders:[]};
 const room=()=>({id:'AABBCC',round:1,months:1,world:{...scenario(),mapMode:'strategy'},players:[{id:'human',name:'Player',country:'FR',orders:[],ready:false}],history:[],phase:'planning'});
 function orders(r,values){r.players[0].orders=validateOrders(r,r.players[0],values);return r;}

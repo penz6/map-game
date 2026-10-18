@@ -35,5 +35,11 @@ export function validateScenario(input,players){
  for(const p of players)check(countryIds.has(p.country)&&regions.some(r=>r.owner===p.country),'Keep every seated human nation and at least one of its provinces.');
  const date=text(input.date,10,'start date');check(/^\d{4}-\d{2}-\d{2}$/.test(date)&&!Number.isNaN(Date.parse(date+'T12:00:00Z'))&&new Date(date+'T12:00:00Z').toISOString().slice(0,10)===date,'Use a real YYYY-MM-DD date.');
  check(input.mapMode===undefined||['wild','strategy'].includes(input.mapMode),'Invalid map mode.');check(input.protectPlayers===undefined||typeof input.protectPlayers==='boolean','Invalid human map protection.');
- return {version:4,mapMode:input.mapMode||'wild',protectPlayers:input.protectPlayers!==false,name:text(input.name,100,'scenario name'),date,premise:text(input.premise,10000,'scenario premise'),countries,regions,units,treaties:[],nextNation:1,nextUnit:Math.max(0,...units.map(u=>/^U\d+$/.test(u.id)?Number(u.id.slice(1)):0))+1};
+ check(input.mapScope===undefined||['world','europe'].includes(input.mapScope),'Invalid map scope.');
+ let neutralPolygons;
+ if(input.neutralPolygons!==undefined){
+  check(Array.isArray(input.neutralPolygons)&&input.neutralPolygons.length<=128,'Too many neutral polygons.');let vertices=0;
+  neutralPolygons=input.neutralPolygons.map(p=>{check(Array.isArray(p)&&p.length>=1&&p.length<=16,'Invalid neutral polygon.');return p.map(p=>{const result=ring(p);vertices+=result.length;check(vertices<=8192,'Too many neutral polygon points.');return result;});});
+ }
+ return {version:4,...(input.mapScope?{mapScope:input.mapScope}:{}),...(neutralPolygons?{neutralPolygons}:{}),mapMode:input.mapMode||'wild',protectPlayers:input.protectPlayers!==false,name:text(input.name,100,'scenario name'),date,premise:text(input.premise,10000,'scenario premise'),countries,regions,units,treaties:[],nextNation:1,nextUnit:Math.max(0,...units.map(u=>/^U\d+$/.test(u.id)?Number(u.id.slice(1)):0))+1};
 }
