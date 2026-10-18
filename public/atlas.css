@@ -4,3 +4,5 @@
 /* Province lookup is a keyboard aid; country search is the visible map control. */
 .map-keyboard-access{clip-path:inset(50%);height:1px;width:1px;overflow:hidden}.map-keyboard-access:focus-within{clip-path:none;width:176px;height:auto;overflow:visible}
 .atlas-shell [data-action=suggestions]{background:#34404e;color:#dce3eb;border-color:#ffffff1f}
+
+.atlas-hover{position:absolute;z-index:4;pointer-events:none;max-width:min(280px,calc(100% - 16px));padding:7px 11px;border:1px solid #85989a;border-radius:5px;background:#1d2b35ed;color:#f8f1de;box-shadow:0 2px 9px #101b2944;font:600 13px/1.4 system-ui,sans-serif;overflow-wrap:anywhere}.atlas-hover[hidden]{display:none}

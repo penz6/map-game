@@ -14,3 +14,13 @@ test('wrong outcome types still receive a repair attempt and typed diagnostics',
  const invalid=response('');invalid.mapChanges[0].provinces=['MISSING'];assert.throws(()=>validateAI(r,invalid));const forged=response('');forged.policies[0].playerId='FR';assert.throws(()=>validateAI(r,forged),/unknown policy/);
 });
 test('both generation schemas constrain event prose and policy outcomes',()=>{for(const schema of[turnSchema,directorTurnSchema]){assert.equal(schema.properties.policies.items.properties.outcome.minLength,1);assert.equal(schema.properties.events.items.properties.title.maxLength,160);assert.equal(schema.properties.events.items.properties.body.maxLength,3000);}});
+
+for(const field of ['country','targetCountry'])test('missing map-change '+field+' is repaired without guessing identities',async()=>{
+ const r=room(),before=structuredClone(r);let calls=0;
+ const proposal=await adjudicateBoundedTurn(r,{contextLength:32768,outputTokens:3072,request:async(messages,format)=>{calls++;
+  const rule=format.properties.mapChanges.items.anyOf.find(x=>x.properties.type.const==='transfer');assert(rule.required.includes(field));
+  if(calls===2)assert.match(JSON.parse(messages[1].content).repairInstruction,new RegExp(field));
+  const value=response('Settlement');if(calls===1)delete value.mapChanges[0][field];return JSON.stringify(value);
+ }});assert.equal(calls,2);assert.equal(resolveTurn(r,proposal).world.regions.find(p=>p.id==='GB1').owner,'IE');assert.deepEqual(r,before);
+ calls=0;await assert.rejects(adjudicateBoundedTurn(r,{contextLength:32768,outputTokens:3072,request:async()=>{calls++;const value=response('Settlement');delete value.mapChanges[0][field];return JSON.stringify(value);}}),e=>e.status===502&&e.validation.field==='mapChanges[0].'+field&&e.aiAttempt===2);assert.equal(calls,2);assert.deepEqual(r,before);
+});

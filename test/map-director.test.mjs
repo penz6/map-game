@@ -53,5 +53,5 @@ test('refs cannot bypass human identity and last-province protections',()=>{
 });
 test('Wild Map sends an exact undirected geography graph and advertises refs in its schema',async()=>{
  const r=room(),ctx=worldContext(r);for(const [i,row]of ctx.territories.entries()){const adjacent=ctx.routes.filter(pair=>pair.includes(i)).map(pair=>ctx.territories[pair.find(j=>j!==i)][0]);assert.deepEqual(adjacent.sort(),r.world.regions.find(p=>p.id===row[0]).neighbors.slice().sort());}
- const {mapChangeSchema}=await import('../map-director.mjs');assert(new RegExp(mapChangeSchema.properties.ref.pattern).test('$tea'));assert(!new RegExp(mapChangeSchema.properties.ref.pattern).test('__proto__'));
+ const {mapChangeSchema}=await import('../map-director.mjs');const secede=mapChangeSchema.anyOf.find(s=>s.properties.type.const==='secede');assert(new RegExp(secede.properties.ref.pattern).test('$tea'));assert(!new RegExp(secede.properties.ref.pattern).test('__proto__'));assert(mapChangeSchema.anyOf.every(s=>s.required.includes('country')));
 });

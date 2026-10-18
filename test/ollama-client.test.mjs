@@ -29,3 +29,9 @@ test('cold load grace permits slow first data without weakening the answer inact
  const result=await readOllama({...args,fetchAI:streamFetch([JSON.stringify({message:{content:'Loaded'},done:true})+'\n'],{delay:30}),idleMs:10,loadMs:200,maxDurationMs:1000});assert.equal(result.content,'Loaded');
  await assert.rejects(readOllama({...args,fetchAI:streamFetch([JSON.stringify({message:{content:'Started'},done:false})+'\n'],{close:false}),idleMs:20,loadMs:200,maxDurationMs:1000}),e=>e.timeoutStage==='responding'&&e.generation.elapsedMs<180);
 });
+
+test('unexpected tool calls reject even mixed content without exposing arguments',async()=>{
+ for(const fetchAI of [streamFetch([JSON.stringify({message:{content:'partial',tool_calls:[{function:{name:'PRIVATE_TOOL',arguments:{secret:'PRIVATE_ARGS'}}}]},done:true})+'\n']),async()=>Response.json({message:{content:'partial',tool_calls:[{function:{name:'PRIVATE_TOOL'}}]},done:true})]){
+  await assert.rejects(readOllama({...args,fetchAI}),e=>e.failureType==='unexpected_tool_call'&&e.generation.toolCallCount===1&&!e.message.includes('PRIVATE'));
+ }
+});

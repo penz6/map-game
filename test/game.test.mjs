@@ -222,3 +222,16 @@ test('local atlas assets and workers are served with correct MIME types and trav
  for(const [file,type]of[['/atlas/relief.webp','image/webp'],['/atlas/rivers.geojson','application/json'],['/atlas/coast-regions.geojson','application/json'],['/vendor/maplibre-worker.js','text/javascript'],['/atlas-map.js','text/javascript'],['/atlas/credits.txt','text/plain']]){const response=await fetch(f.url+file);assert.equal(response.status,200);assert(response.headers.get('content-type').includes(type));await response.arrayBuffer();}
  const blocked=await fetch(f.url+'/vendor/%2e%2e%2fsecurity.mjs');assert.equal(blocked.status,404);
 });
+
+test('tool responses retry once with a direct-answer contract; repeated tools preserve the world',async t=>{
+ let calls=[],alwaysTools=false;
+ const f=await fixture(t,async(url,opts)=>{const payload=JSON.parse(opts.body);calls.push(payload);
+  return Response.json({done:true,message:calls.length===1||alwaysTools?{content:'DISCARDED',tool_calls:[{function:{name:'PRIVATE_TOOL',arguments:{command:'DO_NOT_EXECUTE'}}}]}:{content:'A negotiated agreement is possible.'}});
+ });
+ await f.req(f.route('config'),{mode:'ollama',endpoint:'http://localhost:11434',model:'test',months:1},f.host.token);
+ const reply=await f.req(f.route('chat'),{to:'IT',text:'Discuss trade.'},f.host.token);assert.equal(reply.status,200);assert.equal(calls.length,2);assert.match(calls[1].messages[0].content,/No tools are available/);assert(calls.every(p=>!p.tools));
+ const before=(await f.req(f.route(),null,f.host.token)).body;assert.equal(before.messages.length,2);assert(!JSON.stringify(before).includes('DISCARDED'));
+ alwaysTools=true;calls=[];for(const p of [f.host,f.guest])await f.req(f.route('ready'),{ready:true},p.token);
+ const failed=await f.req(f.route('advance'),{},f.host.token);assert.equal(failed.status,502);assert.match(failed.body.error,/returned tool calls/);assert.equal(calls.length,2);assert(calls.every(p=>p.format?.type==='object'));
+ const after=(await f.req(f.route(),null,f.host.token)).body;assert.deepEqual(after.world,before.world);assert.equal(after.round,1);assert.deepEqual(after.messages,before.messages);
+});
