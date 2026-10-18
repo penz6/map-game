@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { createIdentityStore, securityConfig, canonicalEndpoint, constantEqual, randomToken, digest } from './security.mjs';
-import { scenario } from './scenario.mjs';
+import { scenario,upgradeDefaultGeography } from './scenario.mjs';
 import { nearbyCountries } from './diplomacy.mjs';
 import { validateScenario } from './scenario-editor.mjs';
 import { worldContext, compactRequest, turnDiplomacy } from './context.mjs';
@@ -30,11 +30,16 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  for(const file of fs.readdirSync(dataDir).filter(f=>/^[A-Z0-9]{6}\.json$/.test(f))){
   const r=JSON.parse(fs.readFileSync(path.join(dataDir,file),'utf8'));
   check(r.world?.version===4&&r.players.every(p=>p.accountId),'Unsupported pre-release save format. Use a fresh DATA_DIR for this build.');
+  upgradeDefaultGeography(r.world);
+  for(const point of r.checkpoints||[])upgradeDefaultGeography(point.world);
   if(r.phase==='resolving'){r.phase='planning';r.error='Server restarted during resolution. Orders are intact; retry the turn.';}
   rooms.set(r.id,r);
  }
  const save=(r,previous=r)=>{check(!rooms.has(r.id)||rooms.get(r.id)===previous,'Campaign state changed. Retry using the current world.',409);const file=path.join(dataDir,r.id+'.json');const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(r),{mode:0o600});fs.renameSync(tmp,file);rooms.set(r.id,r);};
  const auth=(r,account)=>{check(!r.closed,'This campaign has been closed.',403);const p=r.players.find(p=>p.accountId===account.user.id);check(p,'You are not a member of this campaign.',403);return p;};
+ // The job is already scoped to this account. A removed seat is stale job
+ // context, including the interval before that account joins another nation.
+ const jobSeat=(r,account,seat)=>{check(!r.closed,'This campaign has been closed.',403);const p=r.players.find(p=>p.accountId===account.user.id);check(p?.id===seat,'Your government seat changed.',409);return p;};
  const host=(r,p)=>check(r.hostId===p.id,'Only the host can do that.',403);
  const planning=r=>check(r.phase==='planning',r.phase==='finished'?'This campaign has finished. Ask an administrator to reopen it.':'Wait for the current world simulation to finish.',409);
  const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,victory:r.victory?.declaration||null,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,contextCeiling:32768,stagedTurns:true,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
@@ -116,7 +121,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    identity.throttle((req.method==='POST'?'write:':'read:')+account.user.id,req.method==='POST'?120:300,60000);
    if(req.method==='POST')check(constantEqual(req.headers['x-csrf-token'],account.session.csrf),'Invalid request verification token. Reload the page.',403);
    if(req.method==='GET'&&parts[1]==='jobs'&&parts.length===3){
-    const job=jobs.get(account.user.id,parts[2]),current=rooms.get(job.roomId);check(current,'Campaign unavailable.',410);const seat=job.seat==='@admin'?(requireAdmin(account),null):auth(current,account);check(job.seat==='@admin'||seat.id===job.seat,'Your government seat changed.',409);
+    const job=jobs.get(account.user.id,parts[2]),current=rooms.get(job.roomId);check(current,'Campaign unavailable.',410);const seat=job.seat==='@admin'?(requireAdmin(account),null):jobSeat(current,account,job.seat);
     reply(res,200,{job:{...jobs.view(job),...(job.state==='done'?{result:job.result?.roomId?view(current,seat):job.result}:{})}});return;
    }
    if(req.method==='POST'&&req.headers['idempotency-key']){

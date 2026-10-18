@@ -29,3 +29,24 @@ test('oversized escaped text is read in its own bounded compression pass, not si
 test('world compaction preserves complete ownership, issuing resources and undirected routes',()=>{
  const r=room('strategy'),input=worldResolutionInput(r,[],[]);assert.equal(input.territories.length,r.world.regions.length);for(const p of r.world.regions){const row=input.territories.findIndex(x=>x[0]===p.id);assert.equal(input.territories[row][2],p.owner);const adjacent=input.routes.filter(pair=>pair.includes(row)).map(pair=>input.territories[pair.find(i=>i!==row)][0]);assert.deepEqual(adjacent.sort(),p.neighbors.slice().sort());}assertWorldFits(r,profile);
 });
+
+for(const mode of ['wild','strategy'])test(`mixed orders expose exact zero-based policy references and repair invalid IDs in ${mode}`,async()=>{
+ const r=room(mode,2,40);r.players[0].orders=[{type:'invest'},r.players[0].orders[0]];r.players[1].orders=[];
+ const before=structuredClone(r);let calls=0;
+ const result=await adjudicateBoundedTurn(r,{...profile,request:async(messages,format)=>{
+  const input=JSON.parse(messages[1].content);calls++;
+  assert.deepEqual(input.policyReferences,[{playerId:'player0',orderIndex:1}]);
+  assert.equal(input.players[0].orders[1].orderIndex,1);
+  assert.equal(format.properties.policies.minItems,1);assert.equal(format.properties.policies.maxItems,1);
+  assert.deepEqual(format.properties.policies.items.anyOf,[{properties:{playerId:{const:'player0'},orderIndex:{const:1}}}]);
+  if(calls===2)assert.match(input.repairInstruction,/zero-based orderIndex exactly/);
+  const value=answer(r,input);if(calls===1)value.policies[0]={...value.policies[0],playerId:'GB',orderIndex:0};return JSON.stringify(value);
+ }});
+ assert.equal(calls,2);assert.equal(result.policies[0].playerId,'player0');assert.equal(result.policies[0].orderIndex,1);assert.deepEqual(r,before);
+});
+test('a turn without policies constrains the AI to an empty policy array',async()=>{
+ const r=room('wild',2,40);r.players.forEach(p=>p.orders=[]);
+ const result=await adjudicateBoundedTurn(r,{...profile,request:async(messages,format)=>{
+  const input=JSON.parse(messages[1].content);assert.deepEqual(input.policyReferences,[]);assert.equal(format.properties.policies.maxItems,0);return JSON.stringify(answer(r,input));
+ }});assert.deepEqual(result.policies,[]);
+});

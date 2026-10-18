@@ -11,7 +11,23 @@ export function validateScenario(input,players){
  check(Array.isArray(input.units)&&input.units.length<=256,'Provide at most 256 armies.');
  const countries=input.countries.map(c=>({id:id(c.id,8),name:text(c.name,50,'nation name'),color:(check(/^#[0-9a-f]{6}$/i.test(c.color),'Use a hexadecimal nation color.'),c.color),label:[number(c.label?.[0],-180,180,'longitude'),number(c.label?.[1],-90,90,'latitude')],treasury:integer(c.treasury,0,999,'treasury'),economy:integer(c.economy,0,100,'economy'),military:integer(c.military,0,100,'military'),stability:integer(c.stability,0,100,'stability'),government:(check(governments.includes(c.government),'Invalid government.'),c.government),ideology:(check(ideologies.includes(c.ideology),'Invalid ideology.'),c.ideology),leader:text(c.leader,60,'leader'),capital:c.capital===null?null:id(c.capital),homeCapital:id(c.homeCapital||c.capital),status:'active'}));
  const countryIds=new Set(countries.map(c=>c.id));check(countryIds.size===countries.length,'Nation IDs must be unique.');check(new Set(countries.map(c=>c.name.toLowerCase())).size===countries.length,'Nation names must be unique.');
- const regions=input.regions.map(r=>{check(Array.isArray(r.points)&&r.points.length>=3&&r.points.length<=128,'A province needs 3–128 polygon points.');check(Array.isArray(r.neighbors)&&r.neighbors.length<=64,'Invalid province adjacency.');check(countryIds.has(r.owner),'Every province must have an existing owner.');const area=Math.abs(r.points.reduce((sum,p,i)=>{const q=r.points[(i+1)%r.points.length];return sum+p[0]*q[1]-q[0]*p[1];},0));check(Number.isFinite(area)&&area>1e-8,'Province polygons need a non-zero area.');return{id:id(r.id),name:text(r.name,80,'province name'),owner:r.owner,points:r.points.map(p=>[number(p?.[0],-180,180,'longitude'),number(p?.[1],-90,90,'latitude')]),neighbors:[...new Set(r.neighbors.map(x=>id(x)))]};});
+ const ring=points=>{
+  check(Array.isArray(points)&&points.length>=3&&points.length<=512,'A polygon ring needs 3–512 points.');
+  const result=points.map(p=>[number(p?.[0],-180,180,'longitude'),number(p?.[1],-90,90,'latitude')]);
+  const area=Math.abs(result.reduce((sum,p,i)=>{const q=result[(i+1)%result.length];return sum+p[0]*q[1]-q[0]*p[1];},0));
+  check(area>1e-8,'Province polygons need a non-zero area.');return result;
+ };
+ const regions=input.regions.map(r=>{
+  check(Array.isArray(r.neighbors)&&r.neighbors.length<=64,'Invalid province adjacency.');check(countryIds.has(r.owner),'Every province must have an existing owner.');
+  const points=ring(r.points),region={id:id(r.id),name:text(r.name,80,'province name'),owner:r.owner,points,neighbors:[...new Set(r.neighbors.map(x=>id(x)))]};
+  if(r.polygons!==undefined){
+   check(Array.isArray(r.polygons)&&r.polygons.length>=1&&r.polygons.length<=128,'Provide 1–128 polygon components.');
+   let vertices=0;
+   region.polygons=r.polygons.map(p=>{check(Array.isArray(p)&&p.length>=1&&p.length<=16,'A polygon needs an outer ring and at most 15 holes.');return p.map(p=>{const result=ring(p);vertices+=result.length;check(vertices<=4096,'A province has too many polygon points.');return result;});});
+   check(JSON.stringify(region.polygons[0][0])===JSON.stringify(points),'Province points must match its first polygon ring.');
+  }
+  return region;
+ });
  const regionIds=new Set(regions.map(r=>r.id));check(regionIds.size===regions.length,'Province IDs must be unique.');for(const r of regions)for(const n of r.neighbors)check(n!==r.id&&regions.find(p=>p.id===n)?.neighbors.includes(r.id),'Province routes must reference existing provinces and be symmetric.');
  for(const c of countries){check(regionIds.has(c.homeCapital),'Original capital must reference a province.');const owned=regions.filter(r=>r.owner===c.id);check(c.capital===null&&!owned.length||owned.some(r=>r.id===c.capital),'A capital must be in its own nation.');c.status=owned.length?'active':'exile';}
  const units=input.units.map(u=>{check(countryIds.has(u.country),'Army owner does not exist.');check(regions.some(r=>r.id===u.province&&r.owner===u.country),'Army must be located in an owned province.');return{id:id(u.id,16),name:text(u.name,60,'army name'),country:u.country,province:u.province,strength:integer(u.strength,1,100,'army strength')};});

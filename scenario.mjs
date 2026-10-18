@@ -1,4 +1,6 @@
-// Original, deliberately low-resolution geographic sketch. No remote map assets.
+import fs from 'node:fs';
+const geography=JSON.parse(fs.readFileSync(new URL('./data-maps/europe-interwar.json',import.meta.url),'utf8'));
+// Legacy sketches retained only to recognize and upgrade existing default saves.
 export const countries = [
   ['GB','United Kingdom','#c2945e',[-3,55]],['FR','France','#6d95b7',[2,47]],
   ['DE','Germany','#b77b78',[10,51]],['IT','Italy','#7eaa8c',[12,43]],
@@ -54,7 +56,7 @@ export function scenario() {
  return expandWorld({name:'Europe · 1936',date:'1936-01-01',premise:'An alternate-history sandbox beginning in January 1936. Historical conditions matter, but outcomes after the start date are not predetermined. Countries act in their own interests. Respect time, logistics, limited resources and player sovereignty.',countries:cs,regions:structuredClone(regions)});
 }
 
-// Schematic provinces cut from our original sketch, not historical borders.
+// Gameplay sectors retain stable IDs; their outlines now follow geographic data.
 function clipX(points, boundary, keepRight) {
  const result=[];
  for(let i=0;i<points.length;i++){
@@ -64,7 +66,7 @@ function clipX(points, boundary, keepRight) {
  }
  return result;
 }
-function expandWorld(world){
+function expandWorld(world,geographic=true){
  const old=world.regions,next=[];
  for(const r of old){
   const xs=r.points.map(p=>p[0]),min=Math.min(...xs),max=Math.max(...xs),a=min+(max-min)/3,b=min+2*(max-min)/3;
@@ -75,5 +77,15 @@ function expandWorld(world){
  const republics=new Set(['FR','IE','CH','PT','CZ','AT','PL','TR','EE','LV','LT']);
  world.countries.forEach(c=>{c.government=['DE','IT','PT'].includes(c.id)?'dictatorship':c.id==='SU'?'council':republics.has(c.id)?'republic':'monarchy';c.ideology=c.id==='SU'?'socialist':['DE','IT'].includes(c.id)?'nationalist':'conservative';c.leader='National cabinet';c.capital=c.id+'0';c.homeCapital=c.capital;c.status='active';});
  world.units=world.countries.map((c,i)=>({id:'U'+(i+1),country:c.id,name:c.name+' Army',province:c.capital,strength:30}));
+ if(geographic)for(const r of world.regions)Object.assign(r,structuredClone(geography[r.owner][Number(r.id.slice(-1))]));
  return world;
+}
+
+// Upgrade only the untouched legacy default geometry. Custom maps are left alone;
+// ownership, nation identities, orders, units and province routes are preserved.
+export function upgradeDefaultGeography(world){
+ const legacy=expandWorld({countries:structuredClone(countries),regions:structuredClone(regions)},false);
+ if(world.regions?.length!==legacy.regions.length||!legacy.regions.every(r=>JSON.stringify(world.regions.find(p=>p.id===r.id)?.points)===JSON.stringify(r.points)))return false;
+ for(const r of world.regions)Object.assign(r,structuredClone(geography[r.id.slice(0,-1)][Number(r.id.slice(-1))]));
+ return true;
 }

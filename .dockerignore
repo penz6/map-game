@@ -30,3 +30,7 @@
 
 !campaign-admin.mjs
 !victory.mjs
+!data-maps/
+!data-maps/**
+!scripts/
+!scripts/build-geography.py
