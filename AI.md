@@ -4,9 +4,9 @@ Version 3.6 enforces a **32,768-token total context ceiling**. The configured wi
 
 This is an application request/budget limit, not a measured VRAM allocation. The separate Ollama process, other clients and GPU backend retain their own settings. No physical RX 6750 XT or real-model quality/latency benchmark was available.
 
-## Starting configuration
+## Existing 7B installations
 
-For the 12 GB RX 6750 XT, keep qwen2.5:7b Q4 as the starting model, one generation and batch 128:
+Existing qwen2.5:7b Q4 installations remain supported with one generation and batch 128. For a modern model to test on the 12 GB RX 6750 XT, see the Qwen3.5 9B preset below.
 
 ```dotenv
 OLLAMA_MODEL=qwen2.5:7b
@@ -14,12 +14,12 @@ AI_MAX_CONCURRENCY=1
 AI_CONTEXT_LENGTH=32768
 AI_BATCH_SIZE=128
 AI_TURN_OUTPUT_TOKENS=3072
-AI_CHAT_OUTPUT_TOKENS=768
+AI_CHAT_OUTPUT_TOKENS=1536
 AI_KEEP_ALIVE_SECONDS=300
 AI_THINK=default
 ```
 
-AI_CONTEXT_LENGTH accepts 4096–32768, but lower values may not fit essential state. Output reserves must leave more than 1,024 tokens of input at startup; every request then passes its stricter actual budget check. A smaller output reserve can cause incomplete answers; done_reason=length is always rejected.
+AI_CONTEXT_LENGTH accepts 4096–32768, but lower values may not fit essential state. Output reserves must leave more than 1,024 tokens of input at startup; every request then passes its stricter actual budget check. A smaller output reserve can cause incomplete answers; incomplete output is never committed; one larger-budget retry is attempted when context permits.
 
 Configure your **separate Ollama service** as well, then restart that service:
 
@@ -38,7 +38,7 @@ Flash attention and q8_0 KV cache remain optional backend-specific settings in .
 1. Encode world data in tables. Keep stable nation/province IDs, exact ownership and required resources/relationships. Omit polygon coordinates and visual labels. Wild Map includes a lossless undirected adjacency graph so the director can reason about borders, alongside exact ownership.
 2. Compact optional public history into selected excerpts, not a fabricated canonical memory. Private chat/advisor compaction uses only the already participant-filtered exchange.
 3. Shorten/drop optional older history and negotiation excerpts as needed. Preserve the current request and the original orders on disk. Public/private histories are not replaced by summaries.
-4. Reserve 3,072 output tokens for turns (768 for chat by default) and 512 for template/framing headroom. Include schema size. Conservatively bound text using UTF-8 bytes, not an English characters-per-token assumption. This is not an exact tokenizer for every model/template.
+4. Reserve 3,072 output tokens for turns (1,536 for chat by default) and 512 for template/framing headroom. Include schema size. Conservatively bound text using UTF-8 bytes, not an English characters-per-token assumption. This is not an exact tokenizer for every model/template.
 5. Small turns use the existing one-call full resolution. If that cannot fit, automatically use staged planning below. No model request bypasses the 32K check.
 
 Compaction is lossy. Incidental events, old promises or nuance may be omitted. Current state remains authoritative, but model summaries and optional memory are not a guarantee of lifelong diplomatic recall. Original campaign data remains saved, subject to the existing 1,000-message chat/advisor retention caps.
@@ -48,11 +48,11 @@ Compaction is lossy. Incidental events, old promises or nuance may be omitted. C
 - Read the full submitted policy texts in batches of up to six, sized by the actual budget. Each batch sees all ownership/identity information and the issuing governments' exact resources, units, routes and other orders. It cannot issue commands for another human government.
 - Policies retain their original playerId/orderIndex. Results are validated together with earlier policy actions, including budget and repeated-unit constraints.
 - If an individual text plus necessary state still cannot fit (for example, heavily escaped text), first send its complete text in a small intent-compression request. The subsequent policy pass uses the explicitly labeled summary. The original is never silently cut or replaced in the save.
-- Supply a bounded intent summary for **every** policy to one final world-resolution pass. These summaries are explicitly lossy (up to 320 UTF-8 bytes per intent at 32K, reduced uniformly to 160 or 80 when a larger world needs the space; 80 in smaller windows); that pass does not re-adjudicate policies. It chooses the final map changes/NPC diplomatic responses or Strategy NPC orders.
+- Supply a bounded intent summary for **every** policy to one final world-resolution pass. These summaries are explicitly lossy (up to 320 UTF-8 bytes per intent at 32K, reduced uniformly to 160 or 80 when a larger world needs the space; 80, 40 or 24 in smaller windows); that pass does not re-adjudicate policies. It chooses the final map changes/NPC diplomatic responses or Strategy NPC orders.
 - Compact the final Strategy graph losslessly into undirected row-index pairs, and omit display-only army names while retaining unit IDs/owners/positions/strength. Output actions still require stable IDs. Full original state stays in the game.
 - Validate the entire combined result and future world's capacity, then commit once. No intermediate policy result changes the shared map, treasury, date or order list. Any failed phase leaves the turn unchanged.
 
-The one world director remains responsible for the final map; batching does not create independent AI nation agents. Large turns take more sequential model calls. Each phase gets at most one correction for invalid JSON/proposals. Network/timeouts/output-limit errors are not automatically replayed. Model timeouts apply per call; a large job can take substantially longer than one timeout interval overall.
+The one world director remains responsible for the final map; batching does not create independent AI nation agents. Large turns take more sequential model calls. Each phase gets at most one correction for invalid JSON/proposals. Network/timeouts are not automatically replayed. Output-limit responses get one larger-budget retry only if the context can accommodate it. Model timeouts apply per call; a large job can take substantially longer than one timeout interval overall.
 
 ## Reproducible 32K stress measurements
 
@@ -108,3 +108,17 @@ Sources: [Qwen2.5 14B model and quantization](https://ollama.com/library/qwen2.5
 Player orders and diplomacy remain untrusted data in user-role JSON, including staged summaries. Country names are never substituted into system prompts; the addressed diplomatic identity is supplied as data. Every generation path gets an explicit boundary rejecting instruction overrides, guaranteed-win demands and coercive threats. Treat these as mitigation, not proof that a language model will always comply.
 
 The server validates exact policy identities, owned units, costs, map IDs, consent and permissions. Wild director changes additionally limit each human nation to `max(2, ceil(starting province count / 4))` newly acquired provinces per turn. Count newly acquired land, not net growth; giving away old land cannot increase that allowance. The same check runs before resolution and again on the applied patch. An excessive gift triggers the bounded repair attempt and then an explicit logged failure with no committed changes. This intentionally limits large territorial gifts even if requested in ordinary language. Strategy mode continues to require validated orders/combat for land changes. Model dialogue cannot execute actions; AI victory assessments remain private recommendations and require administrator confirmation to end a campaign. Lower configured contexts can use shorter 40/24-byte intent summaries so that adding the trust contract does not break the existing 20K fallback; full submitted policies are still read before summarizing. Creative Wild mode still lets the model influence plausible world events and bounded settlements; it is not a competitive anti-cheat guarantee.
+
+## Streaming, repeated output-limit errors, and slow Qwen models
+
+The adapter now requests Ollama's NDJSON stream and reads it incrementally. Partial prose/JSON and thinking never enter game state or dialogue; a complete terminal record is required before validation and commit. The browser shows queued/loading/thinking/responding stages and elapsed time while the existing account-private job endpoint polls. Counters and stages are exposed, not private reasoning text.
+
+`AI_TIMEOUT_SECONDS` is now the **no-data timeout**, default 600 seconds (30–1800 allowed). `AI_LOAD_TIMEOUT_SECONDS` gives cold load/input prefill at least 600 seconds by default, even if an existing deployment still sets the old 180-second timeout. Each received chunk refreshes the inactivity timer. `AI_MAX_DURATION_SECONDS` is a separate hard ceiling for one generation, default 1800 seconds (60–3600 allowed), so a permanently active but unproductive model cannot hold a slot forever. A staged turn can contain multiple individually bounded generations. Network errors, incomplete streams and timeouts leave committed state and saved orders intact.
+
+For Qwen3/Qwen3.5 names, the default `AI_THINK=default` behavior now explicitly disables thinking unless the model name denotes a mandatory-thinking variant. Explicit `AI_THINK=on/off` is respected. Other model families retain their defaults. This prevents a short diplomatic reply from spending its entire token budget on invisible reasoning. The larger token budget still includes both reasoning and answer when thinking is enabled.
+
+The default chat budget increases from 768 to **1536** tokens. Existing deployments may retain an explicit 768-token setting; change `AI_CHAT_OUTPUT_TOKENS=1536` in the existing `.env` and recreate the app container to adopt the new default. If Ollama reports `done_reason=length`, the adapter retries exactly once with the same input and twice the output reserve, capped at **4096 for chat** or **8192 for structured generation**. Every attempt rechecks the full input/schema/output context budget before sending; if there is insufficient headroom the larger call is not sent. Neither a partial first answer nor an unsuccessful retry is committed. Errors identify whether thinking consumed output and when context cannot accommodate a larger reserve.
+
+Container logs now include `ai_generation` timing, model load duration, evaluated tokens, thinking/answer character counts and output reserve. `ai_output_retry` identifies an expanded retry; `ai_progress` provides periodic counters during long streams. `ai_failure` adds the timeout stage and generation counters. Prompts, chats, raw model answers, thinking content and credentials remain excluded. Use `docker compose logs -f app` and the reference in the visible error. Model-specific service errors and memory failures still require the separate Ollama logs.
+
+For the 12 GB RX 6750 XT / 10 GB allowed host RAM, [`.env.qwen3.5.example`](.env.qwen3.5.example) is the modern Qwen3.5 9B starting preset. Pull `qwen3.5:9b` on the Ollama host, use a compatible current Ollama with its Qwen3.5 structured-output fixes, merge the preset into the app's existing environment, then change the saved campaign's model in Settings. Older Ollama had a Qwen3.5 JSON-format bug with thinking disabled; its report confirms resolution in 0.31.2: [upstream issue](https://github.com/ollama/ollama/issues/14645). Preserve the AMD backend that actually works on your machine. This preset does not assert measured performance or change the separate 10 GB host RAM cap. No live model was pulled or switched from this workspace.

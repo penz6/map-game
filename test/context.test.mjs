@@ -51,7 +51,7 @@ test('oversized essential input and multi-byte content fail explicitly without t
 
 test('context profile validates combined output reserve and memory controls',async()=>{
  const {securityConfig}=await import('../security.mjs');
- const profile=securityConfig({});assert.equal(profile.aiConcurrency,1);assert.equal(profile.aiContext,32768);assert.equal(profile.aiBatch,128);assert.equal(profile.aiTurnOutput,3072);assert.equal(profile.aiChatOutput,768);assert.equal(profile.aiKeepAlive,300);
+ const profile=securityConfig({});assert.equal(profile.aiConcurrency,1);assert.equal(profile.aiContext,32768);assert.equal(profile.aiBatch,128);assert.equal(profile.aiTurnOutput,3072);assert.equal(profile.aiChatOutput,1536);assert.equal(profile.aiKeepAlive,300);
  for(const bad of [{AI_BATCH_SIZE:'0'},{AI_CONTEXT_LENGTH:'32769'},{AI_KEEP_ALIVE_SECONDS:'-1'},{AI_TURN_OUTPUT_TOKENS:'99999'},{AI_CHAT_OUTPUT_TOKENS:'0'},{AI_CONTEXT_LENGTH:'4096',AI_TURN_OUTPUT_TOKENS:'4096'}])assert.throws(()=>securityConfig(bad));
 });
 

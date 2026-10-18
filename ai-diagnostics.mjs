@@ -6,6 +6,6 @@ export function reportAIFailure(error,{operation,room},logger=console){
  let endpoint;try{endpoint=new URL(room.endpoint).origin;}catch{endpoint='unconfigured';}
  // No prompts, policies, conversations, account credentials, request bodies or
  // raw model output. Stack frames locate the failing code without the payload.
- logger.error(JSON.stringify({event:'ai_failure',reference,time:new Date().toISOString(),operation,campaign:room.id,round:room.round,model:clean(room.model,150),endpoint,phase:error.aiPhase||'job',attempt:error.aiAttempt||null,status:error.status||500,upstreamStatus:error.upstreamStatus||null,networkCode:clean(error.networkCode,60)||null,errorType:error.failureType||error.name||'Error',reason:clean(error.message),validation:error.validation||null,frames:(error.stack||'').split('\n').filter(s=>/^\s+at /.test(s)).slice(0,6).map(s=>clean(s,250))}));
+ logger.error(JSON.stringify({event:'ai_failure',reference,time:new Date().toISOString(),operation,campaign:room.id,round:room.round,model:clean(room.model,150),endpoint,phase:error.aiPhase||'job',attempt:error.aiAttempt||null,status:error.status||500,upstreamStatus:error.upstreamStatus||null,networkCode:clean(error.networkCode,60)||null,errorType:error.failureType||error.name||'Error',reason:clean(error.message),validation:error.validation||null,timeoutStage:error.timeoutStage||null,generation:error.generation||null,frames:(error.stack||'').split('\n').filter(s=>/^\s+at /.test(s)).slice(0,6).map(s=>clean(s,250))}));
  return reference;
 }

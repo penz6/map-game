@@ -1,0 +1,30 @@
+Historia geographic atlas
+
+Renderer: MapLibre GL JS 5.19.0, BSD-3-Clause. Copyright MapLibre contributors.
+https://github.com/maplibre/maplibre-gl-js/tree/v5.19.0
+Full license: /vendor/maplibre-LICENSE.txt
+
+Polygon union: polygon-clipping 0.15.7, MIT. Copyright Mike Fogel and contributors.
+https://github.com/mfogel/polygon-clipping
+Full license: /vendor/polygon-clipping-LICENSE.md
+
+Relief: Natural Earth II, 1:50m, land cover/shaded relief/water.
+Natural Earth raster and vector data are public domain.
+https://www.naturalearthdata.com/about/terms-of-use/
+https://github.com/nvkelso/natural-earth-raster/tree/f04832c819e7a203d159dffe93cd9245332d6b33/50m_rasters/NE2_50M_LC_SR_W
+Coast display refinement: Natural Earth 1:10m land, clipped around historical inland boundaries.
+Derived coast-regions.geojson.gz retains the Historical Basemaps GPL-3.0-only data license.
+Waterways/lakes: Natural Earth 1:50m, via nvkelso/natural-earth-vector/geojson.
+https://github.com/nvkelso/natural-earth-vector
+Source input checksums and projection: /atlas/build.json and /atlas/coast-build.json
+
+Historical political geography: Historical Basemaps, GPL-3.0-only.
+See data-maps/README.md and data-maps/LICENSE in the source repository.
+Political sectors and smaller-state groupings are gameplay abstractions.
+Modern natural features are geographic context; cities use interwar names.
+
+Open Historia was inspected as a reference for the layered atlas architecture.
+https://github.com/Open-Historia/open-historia (AGPL-3.0-or-later)
+No Open Historia source code, assets or dependencies were copied into this implementation.
+The user-provided Pax Historia HTML was inspected as a visual reference only.
+Its scripts, account/session data, and proprietary assets are not shipped or executed.
