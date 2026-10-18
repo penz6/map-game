@@ -1,0 +1,24 @@
+{
+  "packages": [
+    {
+      "name": "maplibre-gl",
+      "version": "5.19.0",
+      "license": "BSD-3-Clause",
+      "integrity": "sha512-REhYUN8gNP3HlcIZS6QU2uy8iovl31cXsrNDkCcqWSQbCkcpdYLczqDz5PVIwNH42UQNyvukjes/RoHPDrOUmQ=="
+    },
+    {
+      "name": "polygon-clipping",
+      "version": "0.15.7",
+      "license": "MIT",
+      "integrity": "sha512-nhfdr83ECBg6xtqOAJab1tbksbBAOMUltN60bU+llHVOL0e5Onm1WpAXXWXVB39L8AJFssoIhEVuy/S90MmotA=="
+    }
+  ],
+  "files": {
+    "maplibre-gl.css": "761a1130f0960ea369d917ec843f7d1af5ca1dcf27701aef1d9d59821b3bab25",
+    "polygon-clipping-LICENSE.md": "864ae9e4ed75e1571a3bcf5dc9070264213445b32e7e2af5bf60eba46fb656d0",
+    "maplibre-gl.js": "a6be9ebbd932bc8e0733147eda04819becdcc453829316a0b1bad1b4e5619460",
+    "polygon-clipping.js": "7f8619e84a86ce8dd400c9b50430e9c8cf8f26027b19eeb479f109f5c1a9d688",
+    "maplibre-worker.js": "b83ff8093df2258e89f9ea6e4e3e877066510cd0688049efac9aa47928595a85",
+    "maplibre-LICENSE.txt": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2"
+  }
+}

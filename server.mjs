@@ -1,4 +1,7 @@
+import {readOllama,defaultThinking} from './ollama-client.mjs';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import http from 'node:http';
+import {gunzipSync} from 'node:zlib';
 import {reportAIFailure} from './ai-diagnostics.mjs';
 import {assignCampaignSeat} from './campaign-admin.mjs';
 import {assessVictory} from './victory.mjs';
@@ -45,6 +48,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const planning=r=>check(r.phase==='planning',r.phase==='finished'?'This campaign has finished. Ask an administrator to reopen it.':'Wait for the current world simulation to finish.',409);
  const view=(r,p)=>({epoch:r.epoch||0,revision:r.revision||0,mode:r.mode,victory:r.victory?.declaration||null,timer:timerView(r,clock()),id:r.id,name:r.name,round:r.round,months:r.months,phase:r.phase,error:r.error,hostId:r.hostId,me:p.id,nearby:nearbyCountries(r.world,p.country),world:r.world,history:r.history,players:r.players.map(x=>({id:x.id,name:x.name,country:x.country,ready:x.ready,orders:x.id===p.id?x.orders:undefined})),advisorMessages:(r.advisorMessages||[]).filter(m=>m.accountId===p.accountId).map(({accountId,...m})=>m),messages:r.messages.filter(m=>m.to==='all'||m.audience?.includes(p.accountId)),config:r.hostId===p.id?{endpoint:r.endpoint,allowedEndpoints:config.endpoints,model:r.model,mode:r.mode,prompts:editablePrompts(r),promptDefaults,promptContracts:{...promptContracts,turn:r.world.mapMode==='wild'?directorContract:promptContracts.turn},checkpoints:(r.checkpoints||[]).map(c=>({round:c.round,date:c.world.date})),aiProfile:{contextLength:config.aiContext,batchSize:config.aiBatch,concurrency:config.aiConcurrency,contextCeiling:32768,stagedTurns:true,turnOutput:config.aiTurnOutput,chatOutput:config.aiChatOutput,compaction:true},inviteExpires:r.inviteExpires||null}:undefined});
  const checkWorldCapacity=r=>{if(r.mode==='ollama')assertWorldFits(r,{contextLength:config.aiContext,outputTokens:config.aiTurnOutput});};
+ const aiProgress=new AsyncLocalStorage();
  const aiQueue=createAIQueue({concurrency:config.aiConcurrency}),jobs=createAIJobs({clock,maxActive:config.aiConcurrency+32});
  async function readAIJSON(response){const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;check(size<=1024*1024,'AI response exceeded the allowed size.',502);chunks.push(Buffer.from(chunk));}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new GameError('AI returned an invalid response.',502);}}
  async function call(r,messages,format,userId,authorize=()=>{}){
@@ -57,18 +61,26 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
   check(config.endpoints.includes(r.endpoint),'This AI endpoint is not approved by the server administrator.',403);
   const revision=r.revision||0,round=r.round,phase=r.phase,endpoint=r.endpoint,model=r.model;
   authorize();const current=rooms.get(r.id);check(current&&!current.closed&&(current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Please retry.',409);
-  const packed=compactRequest({room:current,messages:typeof messages==='function'?messages():messages,format,contextLength:config.aiContext,outputTokens:format?config.aiTurnOutput:config.aiChatOutput});
-  let response;
-  try{response=await fetchAI(endpoint+'/api/chat',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,messages:packed.messages,stream:false,...(config.aiThink!==undefined?{think:config.aiThink}:{}),...(format?{format}:{}),options:{temperature:format?0.35:0.65,num_ctx:config.aiContext,num_batch:config.aiBatch,num_predict:packed.outputTokens},keep_alive:config.aiKeepAlive}),signal:AbortSignal.timeout(config.aiTimeout)});}
-  catch(e){const failure=new GameError(e.name==='TimeoutError'?`Ollama timed out after ${config.aiTimeout/1000} seconds. Check model load and server capacity.`:'The configured Ollama service could not be reached. Ask the host to check its connection.',502);failure.failureType=e.name==='TimeoutError'?'timeout':'connection';failure.networkCode=e.cause?.code||e.code;throw failure;}
-  if(!response.ok){
-   let reason='';try{const payload=await readAIJSON(response),message=String(payload.error||'');reason=/not found/i.test(message)?'Model or endpoint not found':/out of memory|unable to allocate|insufficient.*memory/i.test(message)?'Insufficient model memory':/load.*model|model.*load/i.test(message)?'Model failed to load':/does not support|unsupported/i.test(message)?'Unsupported model capability':'';}catch{}
-   const failure=new GameError(`Ollama returned HTTP ${response.status}.${reason?' '+reason+'.':''} Check the model name and server logs.`,502);failure.failureType='upstream_http';failure.upstreamStatus=response.status;throw failure;
+  const resolved=typeof messages==='function'?messages():messages;
+  const outputBase=format?config.aiTurnOutput:config.aiChatOutput,outputCeiling=format?8192:4096;
+  let outputTokens=outputBase,lastResult,attempts=0,lastOutputUsed=outputBase,noRoom=false;
+  for(let attempt=1;attempt<=2;attempt++){
+   let packed;
+   try{packed=compactRequest({room:current,messages:resolved,format,contextLength:config.aiContext,outputTokens});}
+   catch(e){if(!lastResult||e.status!==413)throw e;noRoom=true;break;}
+   let lastHeartbeat=0;
+   attempts++;lastOutputUsed=outputTokens;
+   const result=await readOllama({fetchAI,url:endpoint+'/api/chat',payload:{model,messages:packed.messages,...(defaultThinking(model,config.aiThink)!==undefined?{think:defaultThinking(model,config.aiThink)}:{}),...(format?{format}:{}),options:{temperature:format?0.35:0.65,num_ctx:config.aiContext,num_batch:config.aiBatch,num_predict:packed.outputTokens},keep_alive:config.aiKeepAlive},idleMs:config.aiTimeout,loadMs:config.aiLoadTimeout,maxDurationMs:config.aiMaxDuration,onProgress:state=>{aiProgress.getStore()?.({...state,attempt,outputLimit:outputTokens});if(state.elapsedMs-lastHeartbeat>=15000){lastHeartbeat=state.elapsedMs;logger.info?.(JSON.stringify({event:'ai_progress',campaign:r.id,round:r.round,model,attempt,...state}));}}});
+   logger.info?.(JSON.stringify({event:'ai_generation',campaign:r.id,round:r.round,model,attempt,doneReason:result.doneReason||null,elapsedMs:result.elapsedMs,loadDurationMs:result.loadDurationMs,evalCount:result.evalCount,thinkingCharacters:result.thinkingCharacters,answerCharacters:result.answerCharacters,outputLimit:outputTokens}));
+   if(result.doneReason!=='length'){
+    check(result.content,'Ollama returned no answer. Try disabling thinking for this model or choose another model.',502);return result.content;
+   }
+   lastResult=result;
+   if(attempt===2||outputTokens>=outputCeiling)break;
+   outputTokens=Math.min(outputCeiling,outputTokens*2);
+   logger.warn?.(JSON.stringify({event:'ai_output_retry',campaign:r.id,round:r.round,model,outputLimit:outputTokens,thinkingCharacters:result.thinkingCharacters}));
   }
-  const body=await readAIJSON(response);
-  check(body.done_reason!=='length','AI reached its output limit. No game changes were applied. Shorten policies or raise AI_TURN_OUTPUT_TOKENS/AI_CHAT_OUTPUT_TOKENS while keeping enough context headroom.',502);
-  check(typeof body.message?.content==='string'&&body.message.content.trim(),'Ollama returned no answer. Try a larger output budget or another model.',502);
-  return body.message.content.trim();
+  const failure=new GameError(`AI reached its output limit${attempts>1?' after one larger-budget retry':''} (${lastOutputUsed} tokens).${noRoom?' The current context cannot fit a larger response.':''} No game changes were applied.${lastResult?.thinkingCharacters?' The model spent output on thinking; set AI_THINK=off for a model that supports it.':''} See container logs for generation counts and timing.`,502);failure.failureType='output_limit';failure.generation={elapsedMs:lastResult?.elapsedMs,answerCharacters:lastResult?.answerCharacters,thinkingCharacters:lastResult?.thinkingCharacters,outputLimit:lastOutputUsed,attempts};throw failure;
  }
  function context(r,p){return worldContext(r,p,p?nearbyCountries(r.world,p.country):[]);}
  async function adjudicate(r,userId,authorize){
@@ -86,10 +98,10 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
   const key=req.headers['idempotency-key']||token();
   check(typeof key==='string'&&/^[A-Za-z0-9_-]{8,80}$/.test(key),'Use an 8–80 character idempotency key.');
   const revision=r.revision||0,round=r.round,phase=r.phase;
-  const job=jobs.start({owner:account.user.id,key,route:req.url,body:b,roomId:r.id,seat:p.id,work:async()=>{
+  const job=jobs.start({owner:account.user.id,key,route:req.url,body:b,roomId:r.id,seat:p.id,work:async progress=>{
    let release;
    try{release=await aiQueue.acquire(account.user.id);const current=rooms.get(r.id);const fresh=requireAccount(req);check(current,'Campaign unavailable.',410);if(p.id==='@admin')requireAdmin(fresh);else check(auth(current,fresh).id===p.id,'Your government seat changed. Retry.',409);check((current.revision||0)===revision&&current.round===round&&current.phase===phase,'The world changed while your AI request was queued. Retry.',409);
-    return await work();
+    return await aiProgress.run(progress,work);
    }catch(e){reportAIFailure(e,{operation:req.url.split('/').at(-1),room:r},logger);if(req.url.endsWith('/advance')&&rooms.get(r.id)===r&&r.phase==='resolving'&&r.round===round&&(r.revision||0)===revision){r.phase='planning';r.error=`AI turn failed: ${e.message} (log reference ${e.diagnosticReference}). Saved orders are intact.`;save(r);}else if(req.url.endsWith('/advance')&&rooms.get(r.id)===r){r.error=`AI turn failed: ${e.message} (log reference ${e.diagnosticReference}). Saved orders are intact.`;save(r);}throw e;}
    finally{release?.();}
   }});reply(res,202,{job:jobs.view(job)});
@@ -97,7 +109,7 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
  const handler=async(req,res)=>{
   try{
    res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(), payment=()');res.setHeader('Cross-Origin-Resource-Policy','same-origin');res.setHeader('Cache-Control','no-store');
-   res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+   res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
    const url=new URL(req.url,'http://localhost');const parts=url.pathname.split('/').filter(Boolean);
    const loopback=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress),requestHost=req.headers.host||'';
    // This non-sensitive readiness probe is loopback-only, including behind TLS.
@@ -108,8 +120,8 @@ export function createGameServer({dataDir=process.env.DATA_DIR||path.join(root,'
    }else{const hostname=new URL('http://'+requestHost).hostname;check(config.insecureLAN||loopback&&['localhost','127.0.0.1','[::1]'].includes(hostname),'Network access requires HTTPS and PUBLIC_ORIGIN. Development HTTP is limited to loopback.',403);}
    if(parts[0]!=='api'){
     check(req.method==='GET','Method not allowed.',405);
-    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/map-view.js':'map-view.js','/game-layout.js':'game-layout.js','/game.css':'game.css','/style.css':'style.css'}[url.pathname];check(file,'Not found.',404);
-    res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(fs.readFileSync(path.join(root,'public',file)));return;
+    const file={'/':'index.html','/app.js':'app.js','/accounts.js':'accounts.js','/map-view.js':'map-view.js','/game-layout.js':'game-layout.js','/game.css':'game.css','/style.css':'style.css','/atlas-map.js':'atlas-map.js','/atlas-data.js':'atlas-data.js','/atlas.css':'atlas.css'}[url.pathname]||(/^\/(atlas|vendor)\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(url.pathname)?url.pathname.slice(1):undefined);const compressed=file==='atlas/coast-regions.geojson',diskFile=compressed?file+'.gz':file;check(file&&fs.existsSync(path.join(root,'public',diskFile)),'Not found.',404);const gzipResponse=compressed&&/\bgzip\b/.test(req.headers['accept-encoding']||'');
+    res.writeHead(200,{...(gzipResponse?{'Content-Encoding':'gzip'}:{}),...(compressed?{'Vary':'Accept-Encoding'}:{}),'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.webp')?'image/webp':file.endsWith('.geojson')||file.endsWith('.json')?'application/json':file.endsWith('.txt')||file.endsWith('.md')?'text/plain; charset=utf-8':'text/html'});const data=fs.readFileSync(path.join(root,'public',diskFile));res.end(compressed&&!gzipResponse?gunzipSync(data):data);return;
    }
    if(req.method==='GET'&&url.pathname==='/api/health'){reply(res,200,{ok:true});return;}
    if(req.method==='GET'&&url.pathname==='/api/scenario'){reply(res,200,scenario());return;}

@@ -56,7 +56,7 @@ test('Ollama uses the configured server endpoint and strict schema; locks concur
  assert.equal((await req(route('orders'),{orders:[]},guest.token)).status,409);
  assert.equal((await req(route('join'),{country:'IT'},guest.token)).status,409);
  release();const result=await first;assert.equal(result.status,200);assert.equal(result.body.world.date,'1936-04-01');
- assert.equal(called,'http://127.0.0.1:11434/api/chat');assert.equal(payload.model,'local-test:7b');assert.equal(payload.format.type,'object');assert.equal(payload.stream,false);
+ assert.equal(called,'http://127.0.0.1:11434/api/chat');assert.equal(payload.model,'local-test:7b');assert.equal(payload.format.type,'object');assert.equal(payload.stream,true);
  assert.equal((await req(route(),null,guest.token)).body.round,2);
 });
 test('invalid AI response rolls back every resource, world, date and order',async t=>{
@@ -135,7 +135,7 @@ test('native HTTP Ollama adapter discovers models and keeps NPC dialogue private
  const chat=await req(route('chat'),{to:'IT',text:'Let us negotiate.'},host.token);assert.equal(chat.status,200);assert.equal(chat.body.messages.length,2);
  assert.equal((await req(route(),null,guest.token)).body.messages.length,0);
  const answer=await req(route('advisor'),{text:'Assess our situation.'},host.token);assert.equal(answer.status,200);assert.match(answer.body.answer,/trade agreement/);
- assert.equal(received[0].model,'test:7b');assert.equal(received[0].stream,false);assert(!JSON.stringify(received).includes(host.token));
+ assert.equal(received[0].model,'test:7b');assert.equal(received[0].stream,true);assert(!JSON.stringify(received).includes(host.token));
 });
 test('policy adjudication commits exactly once, and host URL validation is actionable',async t=>{
  const {req,host,guest,route}=await fixture(t,async(url,opts)=>{
@@ -193,7 +193,7 @@ test('VRAM profile reaches Ollama and output-limit failures preserve the committ
  for(const p of [host,guest])await req(route('ready'),{ready:true},p.token);
  const before=(await req(route(),null,host.token)).body;
  const result=await req(route('advance'),{},host.token);assert.equal(result.status,502);assert.match(result.body.error,/output limit/);
- assert.equal(payload.options.num_ctx,32768);assert.equal(payload.options.num_batch,128);assert.equal(payload.options.num_predict,3072);assert.equal(payload.keep_alive,300);
+ assert.equal(payload.options.num_ctx,32768);assert.equal(payload.options.num_batch,128);assert.equal(payload.options.num_predict,6144);assert.equal(payload.keep_alive,300);
  const after=(await req(route(),null,host.token)).body;assert.deepEqual(after.world,before.world);assert.equal(after.round,1);assert(after.players.every(p=>p.ready));
  // Failure releases the generation slot for the next request.
  assert.equal((await req(route('advisor'),{text:'What now?'},host.token)).status,502);
@@ -204,4 +204,21 @@ test('oversized premise is rejected before saving configuration or calling Ollam
  const before=(await req(route(),null,host.token)).body;
  const result=await req(route('config'),{mode:'ollama',endpoint:'http://localhost:11434',model:'fake',months:1,premise:'界'.repeat(9900)},host.token);
  assert.equal(result.status,413);assert.match(result.body.error,/32,768/);assert.equal(calls,0);assert.deepEqual((await req(route(),null,host.token)).body.world,before.world);
+});
+
+test('Qwen chat disables default thinking and retries a truncated stream once without duplicating dialogue',async t=>{
+ const calls=[];const encoder=new TextEncoder();
+ const f=await fixture(t,async(url,opts)=>{const payload=JSON.parse(opts.body);calls.push(payload);const incomplete=calls.length===1;
+  const lines=[{message:{content:incomplete?'unfinished draft':'We propose a neutral trade agreement.'},done:false},{message:{content:''},done:true,done_reason:incomplete?'length':'stop',eval_count:incomplete?1536:12}].map(x=>JSON.stringify(x)+'\n').join('');
+  return new Response(new ReadableStream({start(c){c.enqueue(encoder.encode(lines));c.close();}}),{headers:{'content-type':'application/x-ndjson'}});
+ });
+ await f.req(f.route('config'),{mode:'ollama',endpoint:'http://localhost:11434',model:'qwen3.5:9b',months:1},f.host.token);
+ const response=await f.req(f.route('chat'),{to:'IT',text:'Discuss trade.'},f.host.token);assert.equal(response.status,200);assert.equal(calls.length,2);assert(calls.every(x=>x.think===false&&x.stream===true));assert.deepEqual(calls.map(x=>x.options.num_predict),[1536,3072]);
+ const state=(await f.req(f.route(),null,f.host.token)).body;assert.equal(state.messages.length,2);assert.equal(state.messages[0].text,'Discuss trade.');assert.equal(state.messages[1].text,'We propose a neutral trade agreement.');assert(!JSON.stringify(state).includes('unfinished draft'));
+});
+
+test('local atlas assets and workers are served with correct MIME types and traversal is rejected',async t=>{
+ const f=await fixture(t);
+ for(const [file,type]of[['/atlas/relief.webp','image/webp'],['/atlas/rivers.geojson','application/json'],['/atlas/coast-regions.geojson','application/json'],['/vendor/maplibre-worker.js','text/javascript'],['/atlas-map.js','text/javascript'],['/atlas/credits.txt','text/plain']]){const response=await fetch(f.url+file);assert.equal(response.status,200);assert(response.headers.get('content-type').includes(type));await response.arrayBuffer();}
+ const blocked=await fetch(f.url+'/vendor/%2e%2e%2fsecurity.mjs');assert.equal(blocked.status,404);
 });

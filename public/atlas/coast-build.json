@@ -1,0 +1,8 @@
+{
+  "license": "Historical Basemaps adaptation GPL-3.0-only; Natural Earth land public domain",
+  "scenarioSHA256": "f7f549399e71e028e091b65a466735bbd5d0aa7c600d1ceb6f0210b390f758d1",
+  "landInputSHA256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416",
+  "displaySHA256": "3d4e1c069c8ea95616a6878de1ca2e6939234b7d15f1bffba4eaca1eb9b4b4f9",
+  "simplificationDegrees": 0.004,
+  "sourceFingerprint": "FNV-1a over canonical five-decimal coordinate serialization; a display cache key, not a security boundary"
+}
